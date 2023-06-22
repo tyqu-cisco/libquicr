@@ -43,6 +43,7 @@ add_subdirectory(dependencies)
 ###
 add_subdirectory(src)
 
+add_subdirectory(mlstest)
 ###
 ### Enable testing and add tests if QUICR_BUILD_TESTS is ON
 ###
