@@ -168,14 +168,27 @@ public:
     [[maybe_unused]] bool use_reliable_transport,
     quicr::messages::PublishDatagram&& datagram)
   {
+    std::stringstream log_msg;
+    log_msg << "onPublisherObject " << datagram.header.name;
+    logger.log(qtransport::LogLevel::info, log_msg.str());
+
     std::list<Subscriptions::Remote> list =
       subscribeList.find(datagram.header.name);
+
+    if(list.empty()) {
+      std::stringstream log_msg;
+      log_msg << "onPublisherObject, no subscribers found " << datagram.header.name;
+      logger.log(qtransport::LogLevel::info, log_msg.str());
+    }
 
     for (auto dest : list) {
 
       if (dest.context_id == context_id) {
         // split horizon - drop packets back to the source that originated the
         // published object
+        std::stringstream log_msg;
+        log_msg << "onPublisherObject, split horizon, doing nothing " << datagram.header.name;
+        logger.log(qtransport::LogLevel::info, log_msg.str());
         continue;
       }
 
