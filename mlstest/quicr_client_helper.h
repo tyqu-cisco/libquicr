@@ -3,18 +3,16 @@
 #include <map>
 #include <memory>
 
+#include "logger.h"
 #include "mls_user_session.h"
 #include "sub_delegate.h"
-#include "logger.h"
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
 
 class QuicrClientHelper
 {
 public:
-  QuicrClientHelper(const std::string& user,
-                    Logger& logger,
-                    bool is_creator);
+  QuicrClientHelper(const std::string& user, Logger& logger, bool is_creator);
   void subscribe(quicr::Namespace nspace, Logger& logger);
   void unsubscribe(quicr::Namespace nspace);
   void publishJoin(quicr::Name& name);

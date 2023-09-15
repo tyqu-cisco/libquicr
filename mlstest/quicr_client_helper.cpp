@@ -126,43 +126,42 @@ QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
   const auto namespaces = NamespaceConfig::create_default();
 
   if (ns == namespaces.key_package) {
-      if (!is_user_creator) {
-        logger.log(qtransport::LogLevel::info,
-                   "Omit Key Package processing if not the creator");
-        return;
-      }
+    if (!is_user_creator) {
       logger.log(qtransport::LogLevel::info,
-                 "Received KeyPackage from participant.Add to MLS session ");
-      auto [welcome, commit] = session->process_key_package(std::move(data));
-
-      logger.log(qtransport::LogLevel::info, "Publishing Welcome Message ");
-      auto welcome_name = namespaces.welcome;
-      publishData(welcome_name, std::move(welcome));
-
-      logger.log(qtransport::LogLevel::info, "Publishing Commit Message");
-      auto commit_name = namespaces.commit;
-      publishData(commit_name, std::move(commit));
+                 "Omit Key Package processing if not the creator");
       return;
+    }
+    logger.log(qtransport::LogLevel::info,
+               "Received KeyPackage from participant.Add to MLS session ");
+    auto [welcome, commit] = session->process_key_package(std::move(data));
+
+    logger.log(qtransport::LogLevel::info, "Publishing Welcome Message ");
+    auto welcome_name = namespaces.welcome;
+    publishData(welcome_name, std::move(welcome));
+
+    logger.log(qtransport::LogLevel::info, "Publishing Commit Message");
+    auto commit_name = namespaces.commit;
+    publishData(commit_name, std::move(commit));
+    return;
   }
 
   if (ns == namespaces.welcome) {
 
-      logger.log(
-        qtransport::LogLevel::info,
-        "Received Welcome message from the creator. Processing it now ");
+    logger.log(qtransport::LogLevel::info,
+               "Received Welcome message from the creator. Processing it now ");
 
-      if (is_user_creator) {
-        // do nothing
-        return;
-      }
-      session = MlsUserSession::create_for_welcome(user_info_map.at(user),
-                                                   std::move(data));
+    if (is_user_creator) {
+      // do nothing
       return;
+    }
+    session = MlsUserSession::create_for_welcome(user_info_map.at(user),
+                                                 std::move(data));
+    return;
   }
 
   if (ns == namespaces.commit) {
-      logger.log(qtransport::LogLevel::info,
-                 "Commit message process is not implemented");
+    logger.log(qtransport::LogLevel::info,
+               "Commit message process is not implemented");
   }
 
 #if 0

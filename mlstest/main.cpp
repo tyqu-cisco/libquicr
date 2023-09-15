@@ -24,30 +24,27 @@ TEST_CASE("Two person test using quicr and mls")
     if (ns != nspace_config.welcome) {
       creator.subscribe(ns, logger);
       logger.log(qtransport::LogLevel::info,
-                       "Creator, Subscribing  to namespace " + ns.to_hex());
+                 "Creator, Subscribing  to namespace " + ns.to_hex());
     }
     joiner.subscribe(ns, logger);
     logger.log(qtransport::LogLevel::info,
-                     "Subscribing to namespace " + ns.to_hex());
+               "Subscribing to namespace " + ns.to_hex());
   }
 
   // participant publish keypackage
   if (!joiner.isUserCreator()) {
     auto name = nspace_config.key_package.name();
-    logger.log(qtransport::LogLevel::info,
-                     "Publishing to " + name.to_hex());
+    logger.log(qtransport::LogLevel::info, "Publishing to " + name.to_hex());
     joiner.publishJoin(name);
   }
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
   logger.log(qtransport::LogLevel::info,
-                   "Sleeping for 10 seconds for mls handshake to complete");
+             "Sleeping for 10 seconds for mls handshake to complete");
 
-  CHECK_EQ(creator.getSession().get_state(),
-           joiner.getSession().get_state());
+  CHECK_EQ(creator.getSession().get_state(), joiner.getSession().get_state());
 
   std::this_thread::sleep_for(std::chrono::seconds(5));
   logger.log(qtransport::LogLevel::info,
-                   "Sleeping for 5 seconds before unsubscribing");
+             "Sleeping for 5 seconds before unsubscribing");
 }
-

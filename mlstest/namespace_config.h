@@ -28,8 +28,8 @@ struct NamespaceConfig
         quicr::Namespace(quicr::Name("0xAABBCCDD112233EEEE01000002FFFF01"), 80),
       .welcome =
         quicr::Namespace(quicr::Name("0xAABBCCDD112233EEEE02000002FFFF01"), 80),
-      .commit = quicr::Namespace(
-        quicr::Name("0xAABBCCDD112233EEEE03000001FFFF01"), 80),
+      .commit =
+        quicr::Namespace(quicr::Name("0xAABBCCDD112233EEEE03000001FFFF01"), 80),
 
     };
   }
