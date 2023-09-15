@@ -18,14 +18,14 @@
 #include "mls_user_session.h"
 #include "pub_delegate.h"
 #include "quicr_client_helper.h"
-#include "testLogger.h"
+#include "logger.h"
 #include <array>
 
 using namespace mls;
 
 struct common_utils
 {
-  testLogger logger;
+  Logger logger;
   std::stringstream log_msg;
   NamespaceConfig nspace_config = NamespaceConfig::create_default();
   QuicrClientHelper creator{ std::string("FFFOOO"), logger, true };

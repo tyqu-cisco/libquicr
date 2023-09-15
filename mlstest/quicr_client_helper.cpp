@@ -7,7 +7,7 @@
 #include "sub_delegate.h"
 
 QuicrClientHelper::QuicrClientHelper(const std::string& user_in,
-                                     testLogger& logger_in,
+                                     Logger& logger_in,
                                      bool is_creator)
   : user(user_in)
   , group("1234")
@@ -49,7 +49,7 @@ QuicrClientHelper::QuicrClientHelper(const std::string& user_in,
 }
 
 void
-QuicrClientHelper::subscribe(quicr::Namespace nspace, testLogger& logger)
+QuicrClientHelper::subscribe(quicr::Namespace nspace, Logger& logger)
 {
   if (!client) {
     return;

@@ -1,5 +1,5 @@
 #pragma once
-#include "testLogger.h"
+#include "logger.h"
 #include <quicr/quicr_client_delegate.h>
 
 class QuicrClientHelper;
@@ -8,7 +8,7 @@ class QuicrClientHelper;
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(QuicrClientHelper* qclientProxy, testLogger& logger)
+  SubDelegate(QuicrClientHelper* qclientProxy, Logger& logger)
     : logger(logger)
     , client_helper(qclientProxy)
   {
@@ -39,6 +39,6 @@ public:
     [[maybe_unused]] quicr::bytes&& data) override;
 
 private:
-  testLogger& logger;
+  Logger& logger;
   QuicrClientHelper* client_helper;
 };

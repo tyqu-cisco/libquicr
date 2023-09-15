@@ -5,7 +5,7 @@
 
 #include "mls_user_session.h"
 #include "sub_delegate.h"
-#include "testLogger.h"
+#include "logger.h"
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
 
@@ -13,9 +13,9 @@ class QuicrClientHelper
 {
 public:
   QuicrClientHelper(const std::string& user,
-                    testLogger& logger,
+                    Logger& logger,
                     bool is_creator);
-  void subscribe(quicr::Namespace nspace, testLogger& logger);
+  void subscribe(quicr::Namespace nspace, Logger& logger);
   void unsubscribe(quicr::Namespace nspace);
   void publishJoin(quicr::Name& name);
   void publishData(quicr::Namespace& nspace, bytes&& data);
@@ -37,7 +37,7 @@ private:
   bool is_user_creator;
   std::string user;
   std::string group;
-  testLogger& logger;
+  Logger& logger;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
   std::map<std::string, MLsUserInfo> user_info_map{};
   std::unique_ptr<MlsUserSession> session = nullptr;

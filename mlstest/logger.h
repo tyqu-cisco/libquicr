@@ -2,7 +2,7 @@
 #include <mutex>
 #include <transport/logger.h>
 
-class testLogger : public qtransport::LogHandler
+class Logger : public qtransport::LogHandler
 {
 public:
   void log(qtransport::LogLevel level, const std::string& string) override;

@@ -1,10 +1,10 @@
-#include "testLogger.h"
+#include "logger.h"
 #include <chrono>
 #include <iomanip>
 #include <iostream>
 
 void
-testLogger::log(qtransport::LogLevel level, const std::string& string)
+Logger::log(qtransport::LogLevel level, const std::string& string)
 {
   const char* lvl;
   switch (level) {
