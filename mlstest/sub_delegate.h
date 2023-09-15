@@ -2,13 +2,13 @@
 #include "logger.h"
 #include <quicr/quicr_client_delegate.h>
 
-class QuicrClientHelper;
+class MLSClient;
 
 /// quicr delegates
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(QuicrClientHelper* qclientProxy, Logger& logger)
+  SubDelegate(MLSClient* qclientProxy, Logger& logger)
     : logger(logger)
     , client_helper(qclientProxy)
   {
@@ -40,5 +40,5 @@ public:
 
 private:
   Logger& logger;
-  QuicrClientHelper* client_helper;
+  MLSClient* client_helper;
 };

@@ -9,11 +9,18 @@
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
 
-class QuicrClientHelper
+class MLSClient
 {
 public:
-  QuicrClientHelper(const std::string& user, Logger& logger, bool is_creator);
-  void subscribe(quicr::Namespace nspace, Logger& logger);
+  struct Config {
+    const std::string user_id;
+    Logger& logger;
+    bool is_creator;
+    quicr::RelayInfo relay;
+  };
+
+  MLSClient(const Config& config);
+  void subscribe(quicr::Namespace nspace);
   void unsubscribe(quicr::Namespace nspace);
   void publishJoin(quicr::Name& name);
   void publishData(quicr::Namespace& nspace, bytes&& data);
