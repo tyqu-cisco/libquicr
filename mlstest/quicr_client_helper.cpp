@@ -1,7 +1,7 @@
 #include <iostream>
 #include <thread>
 
-#include "fake_config.h"
+#include "namespace_config.h"
 #include "pub_delegate.h"
 #include "quicr_client_helper.h"
 #include "sub_delegate.h"
@@ -122,9 +122,50 @@ QuicrClientHelper::publishData(quicr::Namespace& nspace, bytes&& data)
 void
 QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
 {
-  auto namspace = quicr::Namespace(name, 80);
-  namespaceConfig nspace_config;
+  const auto ns = quicr::Namespace(name, 80);
+  const auto namespaces = NamespaceConfig::create_default();
 
+  if (ns == namespaces.key_package) {
+      if (!is_user_creator) {
+        logger.log(qtransport::LogLevel::info,
+                   "Omit Key Package processing if not the creator");
+        return;
+      }
+      logger.log(qtransport::LogLevel::info,
+                 "Received KeyPackage from participant.Add to MLS session ");
+      auto [welcome, commit] = session->process_key_package(std::move(data));
+
+      logger.log(qtransport::LogLevel::info, "Publishing Welcome Message ");
+      auto welcome_name = namespaces.welcome;
+      publishData(welcome_name, std::move(welcome));
+
+      logger.log(qtransport::LogLevel::info, "Publishing Commit Message");
+      auto commit_name = namespaces.commit;
+      publishData(commit_name, std::move(commit));
+      return;
+  }
+
+  if (ns == namespaces.welcome) {
+
+      logger.log(
+        qtransport::LogLevel::info,
+        "Received Welcome message from the creator. Processing it now ");
+
+      if (is_user_creator) {
+        // do nothing
+        return;
+      }
+      session = MlsUserSession::create_for_welcome(user_info_map.at(user),
+                                                   std::move(data));
+      return;
+  }
+
+  if (ns == namespaces.commit) {
+      logger.log(qtransport::LogLevel::info,
+                 "Commit message process is not implemented");
+  }
+
+#if 0
   SUBSCRIBE_OP_TYPE operation = SUBSCRIBE_OP_TYPE::Invalid;
   for (auto const& [op, nspace] : nspace_config.subscribe_op_map) {
     if (nspace == namspace) {
@@ -180,6 +221,7 @@ QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
       break;
     }
   }
+#endif
 }
 
 bool

@@ -15,22 +15,25 @@ TEST_CASE("Two person test using quicr and mls")
   utils.log_msg << "Name = " << name.to_hex();
 
   // subscribe for all
-  for (auto const& [op, nspace] : utils.nspace_config.subscribe_op_map) {
-    if (op != SUBSCRIBE_OP_TYPE::Welcome) {
-      utils.creator.subscribe(nspace, utils.logger);
+  const auto namespaces = std::vector<quicr::Namespace>{
+    utils.nspace_config.key_package,
+    utils.nspace_config.welcome,
+    utils.nspace_config.commit,
+  };
+  for (const auto& ns : namespaces) {
+    if (ns != utils.nspace_config.welcome) {
+      utils.creator.subscribe(ns, utils.logger);
       utils.logger.log(qtransport::LogLevel::info,
-                       "Creator, Subscribing  to namespace " + nspace.to_hex());
+                       "Creator, Subscribing  to namespace " + ns.to_hex());
     }
-    utils.participants[0].subscribe(nspace, utils.logger);
+    utils.participants[0].subscribe(ns, utils.logger);
     utils.logger.log(qtransport::LogLevel::info,
-                     "Subscribing to namespace " + nspace.to_hex());
+                     "Subscribing to namespace " + ns.to_hex());
   }
 
   // participant publish keypackage
   if (!utils.participants[0].isUserCreator()) {
-    auto name =
-      utils.nspace_config.subscribe_op_map[SUBSCRIBE_OP_TYPE::KeyPackage]
-        .name();
+    auto name = utils.nspace_config.key_package.name();
     utils.logger.log(qtransport::LogLevel::info,
                      "Publishing to " + name.to_hex());
     utils.participants[0].publishJoin(name);

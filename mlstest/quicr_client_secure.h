@@ -14,7 +14,7 @@
 #include <mls/common.h>
 #include <mls/state.h>
 
-#include "fake_config.h"
+#include "namespace_config.h"
 #include "mls_user_session.h"
 #include "pub_delegate.h"
 #include "quicr_client_helper.h"
@@ -27,7 +27,7 @@ struct common_utils
 {
   testLogger logger;
   std::stringstream log_msg;
-  namespaceConfig nspace_config;
+  NamespaceConfig nspace_config = NamespaceConfig::create_default();
   QuicrClientHelper creator{ std::string("FFFOOO"), logger, true };
   std::array<QuicrClientHelper, 1> participants = {
     QuicrClientHelper(std::string("FFFOO1"), logger, false)
