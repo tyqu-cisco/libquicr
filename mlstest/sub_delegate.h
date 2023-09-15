@@ -1,13 +1,14 @@
 #pragma once
-#include "QuicrMessageProxy.h"
 #include "testLogger.h"
 #include <quicr/quicr_client_delegate.h>
+
+class QuicrClientHelper;
 
 /// quicr delegates
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(QuicrMessageProxy* qclientProxy, testLogger& logger)
+  SubDelegate(QuicrClientHelper* qclientProxy, testLogger& logger)
     : logger(logger)
     , client_helper(qclientProxy)
   {
@@ -39,5 +40,5 @@ public:
 
 private:
   testLogger& logger;
-  QuicrMessageProxy* client_helper;
+  QuicrClientHelper* client_helper;
 };

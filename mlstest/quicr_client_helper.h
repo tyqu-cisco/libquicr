@@ -9,7 +9,7 @@
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
 
-class QuicrClientHelper : public QuicrMessageProxy
+class QuicrClientHelper
 {
 public:
   QuicrClientHelper(const std::string& user,
@@ -22,7 +22,7 @@ public:
   // Subscriber Delagate Operations
 
   // proxy handlers for quicr messages
-  void handle(const quicr::Name& name, quicr::bytes&& data) override;
+  void handle(const quicr::Name& name, quicr::bytes&& data);
   MlsUserSession& getSession() const;
   bool isUserCreator();
 
