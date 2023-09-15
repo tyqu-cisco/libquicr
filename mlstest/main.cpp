@@ -58,17 +58,15 @@ TEST_CASE("Two person test using quicr and mls")
   }
 
   // Joiner publishes KeyPackage
-  if (!joiner.isUserCreator()) {
-    auto name = nspace_config.key_package.name();
-    logger.log(qtransport::LogLevel::info, "Publishing to " + name.to_hex());
-    joiner.publishJoin(name);
-  }
+  auto name = nspace_config.key_package.name();
+  logger.log(qtransport::LogLevel::info, "Publishing to " + name.to_hex());
+  joiner.join(name);
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
   logger.log(qtransport::LogLevel::info,
              "Sleeping for 10 seconds for mls handshake to complete");
 
-  CHECK_EQ(creator.getSession().get_state(), joiner.getSession().get_state());
+  CHECK_EQ(creator.session().get_state(), joiner.session().get_state());
 
   std::this_thread::sleep_for(std::chrono::seconds(5));
   logger.log(qtransport::LogLevel::info,

@@ -20,30 +20,27 @@ public:
   };
 
   MLSClient(const Config& config);
+
+  // Control publications and subscriptions
   void subscribe(quicr::Namespace nspace);
   void unsubscribe(quicr::Namespace nspace);
-  void publishJoin(quicr::Name& name);
-  void publishData(quicr::Namespace& nspace, bytes&& data);
-  // Subscriber Delagate Operations
+  void publish(quicr::Namespace& nspace, bytes&& data);
 
-  // proxy handlers for quicr messages
+  // MLS operations
+  void join(quicr::Name& name);
   void handle(const quicr::Name& name, quicr::bytes&& data);
-  MLSSession& getSession() const;
-  bool isUserCreator();
+
+  // Access internal state
+  bool joined() const;
+  const MLSSession& session() const;
 
 private:
-  // helper to create MLS State and User wrapper.
-  std::unique_ptr<MLSSession> setupMLSSession(const std::string& user,
-                                              const std::string& group,
-                                              bool is_creator);
-
   mls::CipherSuite suite{ mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
-  quicr::QuicRClient* client;
-  bool is_user_creator;
-  std::string user;
-  std::string group;
+
   Logger& logger;
+
+  std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
-  std::map<std::string, MLSInitInfo> user_info_map{};
-  std::unique_ptr<MLSSession> session = nullptr;
+
+  std::variant<MLSInitInfo, MLSSession> mls_session;
 };

@@ -4,15 +4,12 @@
 using namespace mls;
 
 MLSInitInfo::MLSInitInfo(CipherSuite suite_in,
-                         std::string user_id_in,
-                         std::string group_id_in)
+                         std::string user_id_in)
   : suite(suite_in)
-  , user_id(std::move(user_id_in))
-  , group_id(std::move(group_id_in))
   , init_key(HPKEPrivateKey::generate(suite))
   , encryption_key(HPKEPrivateKey::generate(suite))
   , signature_key(SignaturePrivateKey::generate(suite))
-  , credential(Credential::basic(from_ascii(user_id)))
+  , credential(Credential::basic(from_ascii(user_id_in)))
 {
   auto leaf_node = LeafNode{ suite,
                              encryption_key.public_key,
@@ -28,16 +25,17 @@ MLSInitInfo::MLSInitInfo(CipherSuite suite_in,
   };
 }
 
-std::unique_ptr<MLSSession>
-MLSSession::create(const MLSInitInfo& info)
+MLSSession
+MLSSession::create(const MLSInitInfo& info,
+                   const bytes& group_id)
 {
-  auto mls_state = State{ from_ascii(info.group_id),  info.suite,
+  auto mls_state = State{ group_id,  info.suite,
                           info.encryption_key,        info.signature_key,
                           info.key_package.leaf_node, {} };
-  return std::make_unique<MLSSession>(std::move(mls_state));
+  return { std::move(mls_state) };
 }
 
-std::unique_ptr<MLSSession>
+MLSSession
 MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
 {
   const auto welcome = tls::get<mls::Welcome>(welcome_data);
@@ -48,7 +46,7 @@ MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
                       welcome,
                       std::nullopt,
                       {} };
-  return std::make_unique<MLSSession>(std::move(state));
+  return { std::move(state) };
 }
 
 MLSSession::MLSSession(mls::State&& state)

@@ -1,3 +1,11 @@
+* Remove `sleep()` calls to the extent possible
+* Avoid raw pointers to the extent possible
+* Hide more logic inside MLSClient
+    * Automatically subscribe to the required namespaces
+    * Basically just expose join()
+* Fix namespace scheme
+
+
 - client to do http request/response to epoch server
 - mlspp cmake integration - done
 - libquicr cmake integration - done
