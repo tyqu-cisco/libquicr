@@ -1,21 +1,23 @@
 #include "sub_delegate.h"
-#include <sstream>
 #include <iostream>
+#include <sstream>
 
-void SubDelegate::onSubscribeResponse(
+void
+SubDelegate::onSubscribeResponse(
   [[maybe_unused]] const quicr::Namespace& quicr_namespace,
   [[maybe_unused]] const quicr::SubscribeResult& result)
 {
 
   std::stringstream log_msg;
-  log_msg << "onSubscriptionResponse: name: " << quicr_namespace.to_hex()
-          << "/" << int(quicr_namespace.length())
+  log_msg << "onSubscriptionResponse: name: " << quicr_namespace.to_hex() << "/"
+          << int(quicr_namespace.length())
           << " status: " << int(static_cast<uint8_t>(result.status));
 
   logger.log(qtransport::LogLevel::info, log_msg.str());
 }
 
-void SubDelegate::onSubscriptionEnded(
+void
+SubDelegate::onSubscriptionEnded(
   [[maybe_unused]] const quicr::Namespace& quicr_namespace,
   [[maybe_unused]] const quicr::SubscribeResult::SubscribeStatus& reason)
 
@@ -28,11 +30,12 @@ void SubDelegate::onSubscriptionEnded(
   logger.log(qtransport::LogLevel::info, log_msg.str());
 }
 
-void SubDelegate::onSubscribedObject([[maybe_unused]] const quicr::Name& quicr_name,
-                   [[maybe_unused]] uint8_t priority,
-                   [[maybe_unused]] uint16_t expiry_age_ms,
-                   [[maybe_unused]] bool use_reliable_transport,
-                   [[maybe_unused]] quicr::bytes&& data)
+void
+SubDelegate::onSubscribedObject([[maybe_unused]] const quicr::Name& quicr_name,
+                                [[maybe_unused]] uint8_t priority,
+                                [[maybe_unused]] uint16_t expiry_age_ms,
+                                [[maybe_unused]] bool use_reliable_transport,
+                                [[maybe_unused]] quicr::bytes&& data)
 {
   std::stringstream log_msg;
   std::cerr << "onSubscribedObject" << std::endl;
@@ -46,7 +49,8 @@ void SubDelegate::onSubscribedObject([[maybe_unused]] const quicr::Name& quicr_n
   client_helper->handle(quicr_name, std::move(data));
 }
 
-void SubDelegate::onSubscribedObjectFragment(
+void
+SubDelegate::onSubscribedObjectFragment(
   [[maybe_unused]] const quicr::Name& quicr_name,
   [[maybe_unused]] uint8_t priority,
   [[maybe_unused]] uint16_t expiry_age_ms,

@@ -3,4 +3,6 @@
 void
 PubDelegate::onPublishIntentResponse(
   [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-  [[maybe_unused]] const quicr::PublishIntentResult& result) {}
+  [[maybe_unused]] const quicr::PublishIntentResult& result)
+{
+}

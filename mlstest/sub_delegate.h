@@ -1,16 +1,17 @@
 #pragma once
-#include <quicr/quicr_client_delegate.h>
 #include "QuicrMessageProxy.h"
 #include "testLogger.h"
+#include <quicr/quicr_client_delegate.h>
 
 /// quicr delegates
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
   SubDelegate(QuicrMessageProxy* qclientProxy, testLogger& logger)
-    : logger(logger),
-     client_helper(qclientProxy)
-  {}
+    : logger(logger)
+    , client_helper(qclientProxy)
+  {
+  }
 
   void onSubscribeResponse(
     [[maybe_unused]] const quicr::Namespace& quicr_namespace,

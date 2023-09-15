@@ -1,7 +1,7 @@
 #pragma once
 #include "../include/quicr/quicr_client.h"
 
- class PubDelegate : public quicr::PublisherDelegate
+class PubDelegate : public quicr::PublisherDelegate
 {
 public:
   void onPublishIntentResponse(

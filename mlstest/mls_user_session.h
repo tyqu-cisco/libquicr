@@ -1,16 +1,16 @@
 #pragma once
+#include <bytes/bytes.h>
 #include <hpke/random.h>
 #include <mls/common.h>
 #include <mls/state.h>
-#include <bytes/bytes.h>
 
 #include <memory>
 
 using namespace mls;
 
-
 // Information needed per user to populate MLS state
-struct MLsUserInfo {
+struct MLsUserInfo
+{
   std::string user;
   std::string group;
   CipherSuite suite;
@@ -21,17 +21,20 @@ struct MLsUserInfo {
   Credential credential;
 };
 
-
 class MlsUserSession
 {
 public:
   // create key-package
-  static MLsUserInfo setup_mls_userinfo(const std::string& user, const std::string& group, CipherSuite suite);
+  static MLsUserInfo setup_mls_userinfo(const std::string& user,
+                                        const std::string& group,
+                                        CipherSuite suite);
 
   // setup mls state for the creator
   static std::unique_ptr<MlsUserSession> create(const MLsUserInfo& info);
   // setup mls state for the joiners
-  static std::unique_ptr<MlsUserSession> create_for_welcome(const MLsUserInfo& info, bytes&& welcome_data);
+  static std::unique_ptr<MlsUserSession> create_for_welcome(
+    const MLsUserInfo& info,
+    bytes&& welcome_data);
 
   MlsUserSession(mls::State&& state, const MLsUserInfo& user_info);
   const KeyPackage& get_key_package() const;
@@ -40,12 +43,10 @@ public:
   State& get_state();
 
 private:
-
   void setup_user(const bytes& user_id, CipherSuite suite);
   State make_state(bytes&& welcome_data);
-  bytes fresh_secret() const ;
+  bytes fresh_secret() const;
 
   MLsUserInfo user_info{};
   State mls_state;
-
 };
