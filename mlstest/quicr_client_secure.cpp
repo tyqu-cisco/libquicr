@@ -11,7 +11,6 @@ TEST_CASE("Two person test using quicr and mls")
 {
   auto user_string = std::string("FFFOOO");
   auto name = quicr::Name(std::string("FFF000"));
-  bool is_creator = true;
   common_utils utils;
   utils.log_msg << "Name = " << name.to_hex();
 
