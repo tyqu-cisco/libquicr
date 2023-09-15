@@ -6,6 +6,8 @@
 #include "quicr_client_helper.h"
 #include "sub_delegate.h"
 
+using namespace mls;
+
 QuicrClientHelper::QuicrClientHelper(const std::string& user_in,
                                      Logger& logger_in,
                                      bool is_creator)
@@ -100,7 +102,7 @@ QuicrClientHelper::publishJoin(quicr::Name& name)
 
   // do publish
   logger.log(qtransport::LogLevel::info, "Publish, name=" + name.to_hex());
-  auto kp_data = tls::marshal(user_info_map.at(user).keypackage);
+  auto kp_data = tls::marshal(user_info_map.at(user).key_package);
   client->publishNamedObject(name, 0, 10000, false, std::move(kp_data));
 }
 
@@ -133,7 +135,7 @@ QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
     }
     logger.log(qtransport::LogLevel::info,
                "Received KeyPackage from participant.Add to MLS session ");
-    auto [welcome, commit] = session->process_key_package(std::move(data));
+    auto [welcome, commit] = session->add(std::move(data));
 
     logger.log(qtransport::LogLevel::info, "Publishing Welcome Message ");
     auto welcome_name = namespaces.welcome;
@@ -154,8 +156,7 @@ QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
       // do nothing
       return;
     }
-    session = MlsUserSession::create_for_welcome(user_info_map.at(user),
-                                                 std::move(data));
+    session = MLSSession::join(user_info_map.at(user), std::move(data));
     return;
   }
 
@@ -163,64 +164,6 @@ QuicrClientHelper::handle(const quicr::Name& name, quicr::bytes&& data)
     logger.log(qtransport::LogLevel::info,
                "Commit message process is not implemented");
   }
-
-#if 0
-  SUBSCRIBE_OP_TYPE operation = SUBSCRIBE_OP_TYPE::Invalid;
-  for (auto const& [op, nspace] : nspace_config.subscribe_op_map) {
-    if (nspace == namspace) {
-      operation = op;
-      break;
-    }
-  }
-
-  switch (operation) {
-    case SUBSCRIBE_OP_TYPE::KeyPackage: {
-      if (!is_user_creator) {
-        logger.log(qtransport::LogLevel::info,
-                   "Omit Key Package processing if not the creator");
-        break;
-      }
-      logger.log(qtransport::LogLevel::info,
-                 "Received KeyPackage from participant.Add to MLS session ");
-      auto [welcome, commit] = session->process_key_package(std::move(data));
-
-      logger.log(qtransport::LogLevel::info, "Publishing Welcome Message ");
-      auto welcome_name =
-        nspace_config.subscribe_op_map[SUBSCRIBE_OP_TYPE::Welcome];
-      publishData(welcome_name, std::move(welcome));
-
-      logger.log(qtransport::LogLevel::info, "Publishing Commit Message");
-      auto commit_name =
-        nspace_config.subscribe_op_map[SUBSCRIBE_OP_TYPE::Commit];
-      publishData(commit_name, std::move(commit));
-      break;
-    }
-
-    case SUBSCRIBE_OP_TYPE::Welcome: {
-      logger.log(
-        qtransport::LogLevel::info,
-        "Received Welcome message from the creator. Processing it now ");
-
-      if (is_user_creator) {
-        // do nothing
-        break;
-      }
-      session = MlsUserSession::create_for_welcome(user_info_map.at(user),
-                                                   std::move(data));
-
-      break;
-    }
-
-    case SUBSCRIBE_OP_TYPE::Commit: {
-      logger.log(qtransport::LogLevel::info,
-                 "Commit message process is not implemented");
-      break;
-    }
-    default: {
-      break;
-    }
-  }
-#endif
 }
 
 bool
@@ -229,7 +172,7 @@ QuicrClientHelper::isUserCreator()
   return is_user_creator;
 };
 
-MlsUserSession&
+MLSSession&
 QuicrClientHelper::getSession() const
 {
   if (session == nullptr) {
@@ -240,16 +183,16 @@ QuicrClientHelper::getSession() const
 
 // private
 
-std::unique_ptr<MlsUserSession>
+std::unique_ptr<MLSSession>
 QuicrClientHelper::setupMLSSession(const std::string& user,
                                    const std::string& group,
                                    bool is_creator)
 {
 
-  user_info_map[user] = MlsUserSession::setup_mls_userinfo(user, group, suite);
+  user_info_map.emplace(user, MLSInitInfo{ suite, user, group });
 
   if (is_creator) {
-    return MlsUserSession::create(user_info_map[user]);
+    return MLSSession::create(user_info_map[user]);
   }
   // the session will be created as part of welcome processing
   return nullptr;

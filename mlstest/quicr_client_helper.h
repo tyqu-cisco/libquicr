@@ -4,7 +4,7 @@
 #include <memory>
 
 #include "logger.h"
-#include "mls_user_session.h"
+#include "mls_session.h"
 #include "sub_delegate.h"
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
@@ -21,22 +21,22 @@ public:
 
   // proxy handlers for quicr messages
   void handle(const quicr::Name& name, quicr::bytes&& data);
-  MlsUserSession& getSession() const;
+  MLSSession& getSession() const;
   bool isUserCreator();
 
 private:
   // helper to create MLS State and User wrapper.
-  std::unique_ptr<MlsUserSession> setupMLSSession(const std::string& user,
-                                                  const std::string& group,
-                                                  bool is_creator);
+  std::unique_ptr<MLSSession> setupMLSSession(const std::string& user,
+                                              const std::string& group,
+                                              bool is_creator);
 
-  CipherSuite suite{ CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
+  mls::CipherSuite suite{ mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
   quicr::QuicRClient* client;
   bool is_user_creator;
   std::string user;
   std::string group;
   Logger& logger;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
-  std::map<std::string, MLsUserInfo> user_info_map{};
-  std::unique_ptr<MlsUserSession> session = nullptr;
+  std::map<std::string, MLSInitInfo> user_info_map{};
+  std::unique_ptr<MLSSession> session = nullptr;
 };
