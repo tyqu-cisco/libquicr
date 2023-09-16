@@ -10,7 +10,7 @@
 TEST_CASE("Two person test using quicr and mls")
 {
   auto logger = Logger{};
-  const auto nspace_config = NamespaceConfig::create_default();
+  const auto ns_config = NamespaceConfig::create_default();
 
   const auto* relay_var = getenv("MLS_RELAY");
   const auto* port_var = getenv("MLS_PORT");
@@ -42,12 +42,12 @@ TEST_CASE("Two person test using quicr and mls")
 
   // Subscribe to the relevant namespaces
   const auto namespaces = std::vector<quicr::Namespace>{
-    nspace_config.key_package,
-    nspace_config.welcome,
-    nspace_config.commit,
+    ns_config.key_package,
+    ns_config.welcome,
+    ns_config.commit,
   };
   for (const auto& ns : namespaces) {
-    if (ns != nspace_config.welcome) {
+    if (ns != ns_config.welcome) {
       creator.subscribe(ns);
       logger.log(qtransport::LogLevel::info,
                  "Creator, Subscribing  to namespace " + ns.to_hex());
@@ -58,7 +58,7 @@ TEST_CASE("Two person test using quicr and mls")
   }
 
   // Joiner publishes KeyPackage
-  auto name = nspace_config.key_package.name();
+  auto name = ns_config.key_package.name();
   logger.log(qtransport::LogLevel::info, "Publishing to " + name.to_hex());
   joiner.join(name);
 

@@ -36,19 +36,19 @@ MLSClient::MLSClient(const Config& config)
 }
 
 void
-MLSClient::subscribe(quicr::Namespace nspace)
+MLSClient::subscribe(quicr::Namespace ns)
 {
-  if (!sub_delegates.count(nspace)) {
-    sub_delegates[nspace] = std::make_shared<SubDelegate>(this, logger);
+  if (!sub_delegates.count(ns)) {
+    sub_delegates[ns] = std::make_shared<SubDelegate>(this, logger);
   }
 
   std::stringstream log_msg;
-  log_msg << "Subscribe to " << nspace.to_hex();
+  log_msg << "Subscribe to " << ns.to_hex();
   logger.log(qtransport::LogLevel::info, log_msg.str());
 
   quicr::bytes empty;
-  client->subscribe(sub_delegates[nspace],
-                    nspace,
+  client->subscribe(sub_delegates[ns],
+                    ns,
                     quicr::SubscribeIntent::immediate,
                     "origin_url",
                     false,
@@ -57,22 +57,22 @@ MLSClient::subscribe(quicr::Namespace nspace)
 }
 
 void
-MLSClient::unsubscribe(quicr::Namespace nspace)
+MLSClient::unsubscribe(quicr::Namespace ns)
 {
   logger.log(qtransport::LogLevel::info, "Now unsubscribing");
-  client->unsubscribe(nspace, {}, {});
+  client->unsubscribe(ns, {}, {});
 }
 
 void
 MLSClient::join(quicr::Name& name)
 {
-  const auto nspace = quicr::Namespace(name, 80);
+  const auto ns = quicr::Namespace(name, 80);
   logger.log(qtransport::LogLevel::info,
              "Publish Intent for name: " + name.to_hex() +
-               ", namespace: " + nspace.to_hex());
+               ", namespace: " + ns.to_hex());
 
   const auto pd = std::make_shared<PubDelegate>();
-  client->publishIntent(pd, nspace, {}, {}, {});
+  client->publishIntent(pd, ns, {}, {}, {});
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   // do publish
@@ -83,18 +83,18 @@ MLSClient::join(quicr::Name& name)
 }
 
 void
-MLSClient::publish(quicr::Namespace& nspace, bytes&& data)
+MLSClient::publish(quicr::Namespace& ns, bytes&& data)
 {
 
   const auto pd = std::make_shared<PubDelegate>();
-  client->publishIntent(pd, nspace, {}, {}, {});
+  client->publishIntent(pd, ns, {}, {}, {});
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   std::stringstream log_msg;
-  log_msg << "Publish, name= " << nspace.name().to_hex()
+  log_msg << "Publish, name= " << ns.name().to_hex()
           << ", size=" << data.size();
   logger.log(qtransport::LogLevel::info, log_msg.str());
-  client->publishNamedObject(nspace.name(), 0, 10000, false, std::move(data));
+  client->publishNamedObject(ns.name(), 0, 10000, false, std::move(data));
 }
 
 void
