@@ -3,12 +3,12 @@
 
 PubDelegate::PubDelegate(Logger& logger_in)
   : logger(logger_in)
-{}
+{
+}
 
 void
-PubDelegate::onPublishIntentResponse(
-  const quicr::Namespace& quicr_namespace,
-  const quicr::PublishIntentResult& result)
+PubDelegate::onPublishIntentResponse(const quicr::Namespace& quicr_namespace,
+                                     const quicr::PublishIntentResult& result)
 {
   std::stringstream log_msg;
   log_msg << "onSubscriptionResponse: name: " << quicr_namespace.to_hex() << "/"
