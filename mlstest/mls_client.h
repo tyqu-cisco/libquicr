@@ -12,7 +12,8 @@
 class MLSClient
 {
 public:
-  struct Config {
+  struct Config
+  {
     const std::string user_id;
     Logger& logger;
     bool is_creator;

@@ -1,9 +1,9 @@
 #include <iostream>
 #include <thread>
 
+#include "mls_client.h"
 #include "namespace_config.h"
 #include "pub_delegate.h"
-#include "mls_client.h"
 #include "sub_delegate.h"
 
 using namespace mls;
@@ -14,7 +14,8 @@ MLSClient::MLSClient(const Config& config)
   // Set up Quicr relay connection
   std::stringstream log_msg;
   log_msg.str("");
-  log_msg << "Connecting to " << config.relay.hostname << ":" << config.relay.port;
+  log_msg << "Connecting to " << config.relay.hostname << ":"
+          << config.relay.port;
   logger.log(qtransport::LogLevel::info, "");
   logger.log(qtransport::LogLevel::info, log_msg.str());
 
@@ -29,7 +30,7 @@ MLSClient::MLSClient(const Config& config)
   const auto init_info = MLSInitInfo{ suite, config.user_id };
   if (config.is_creator) {
     const auto group_id = from_ascii("asdf"); // XXX
-    mls_session = MLSSession::create(init_info, group_id );
+    mls_session = MLSSession::create(init_info, group_id);
   } else {
     mls_session = init_info;
   }
@@ -39,7 +40,7 @@ void
 MLSClient::subscribe(quicr::Namespace ns)
 {
   if (!sub_delegates.count(ns)) {
-    sub_delegates[ns] = std::make_shared<SubDelegate>(this, logger);
+    sub_delegates[ns] = std::make_shared<SubDelegate>(*this, logger);
   }
 
   std::stringstream log_msg;
@@ -71,7 +72,7 @@ MLSClient::join(quicr::Name& name)
              "Publish Intent for name: " + name.to_hex() +
                ", namespace: " + ns.to_hex());
 
-  const auto pd = std::make_shared<PubDelegate>();
+  const auto pd = std::make_shared<PubDelegate>(logger);
   client->publishIntent(pd, ns, {}, {}, {});
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -85,8 +86,7 @@ MLSClient::join(quicr::Name& name)
 void
 MLSClient::publish(quicr::Namespace& ns, bytes&& data)
 {
-
-  const auto pd = std::make_shared<PubDelegate>();
+  const auto pd = std::make_shared<PubDelegate>(logger);
   client->publishIntent(pd, ns, {}, {}, {});
   std::this_thread::sleep_for(std::chrono::seconds(1));
 

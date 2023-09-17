@@ -15,8 +15,8 @@ TEST_CASE("Two person test using quicr and mls")
   const auto* relay_var = getenv("MLS_RELAY");
   const auto* port_var = getenv("MLS_PORT");
 
-  const auto hostname = std::string(relay_var? relay_var : "127.0.0.1");
-  const auto port = uint16_t(port_var? atoi(port_var) : 1234);
+  const auto hostname = std::string(relay_var ? relay_var : "127.0.0.1");
+  const auto port = uint16_t(port_var ? atoi(port_var) : 1234);
   const auto relay = quicr::RelayInfo{
     .hostname = hostname,
     .port = port,

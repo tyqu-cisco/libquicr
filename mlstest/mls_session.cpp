@@ -3,8 +3,7 @@
 
 using namespace mls;
 
-MLSInitInfo::MLSInitInfo(CipherSuite suite_in,
-                         std::string user_id_in)
+MLSInitInfo::MLSInitInfo(CipherSuite suite_in, std::string user_id_in)
   : suite(suite_in)
   , init_key(HPKEPrivateKey::generate(suite))
   , encryption_key(HPKEPrivateKey::generate(suite))
@@ -26,12 +25,14 @@ MLSInitInfo::MLSInitInfo(CipherSuite suite_in,
 }
 
 MLSSession
-MLSSession::create(const MLSInitInfo& info,
-                   const bytes& group_id)
+MLSSession::create(const MLSInitInfo& info, const bytes& group_id)
 {
-  auto mls_state = State{ group_id,  info.suite,
-                          info.encryption_key,        info.signature_key,
-                          info.key_package.leaf_node, {} };
+  auto mls_state = State{ group_id,
+                          info.suite,
+                          info.encryption_key,
+                          info.signature_key,
+                          info.key_package.leaf_node,
+                          {} };
   return { std::move(mls_state) };
 }
 

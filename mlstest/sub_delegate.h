@@ -4,41 +4,33 @@
 
 class MLSClient;
 
-/// quicr delegates
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(MLSClient* qclientProxy, Logger& logger)
-    : logger(logger)
-    , client_helper(qclientProxy)
-  {
-  }
+  SubDelegate(MLSClient& mls_client_in, Logger& logger_in);
 
-  void onSubscribeResponse(
-    [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-    [[maybe_unused]] const quicr::SubscribeResult& result) override;
+  void onSubscribeResponse(const quicr::Namespace& quicr_namespace,
+                           const quicr::SubscribeResult& result) override;
 
   void onSubscriptionEnded(
-    [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-    [[maybe_unused]] const quicr::SubscribeResult::SubscribeStatus& reason)
-    override;
+    const quicr::Namespace& quicr_namespace,
+    const quicr::SubscribeResult::SubscribeStatus& reason) override;
 
-  void onSubscribedObject([[maybe_unused]] const quicr::Name& quicr_name,
-                          [[maybe_unused]] uint8_t priority,
-                          [[maybe_unused]] uint16_t expiry_age_ms,
-                          [[maybe_unused]] bool use_reliable_transport,
-                          [[maybe_unused]] quicr::bytes&& data) override;
+  void onSubscribedObject(const quicr::Name& quicr_name,
+                          uint8_t priority,
+                          uint16_t expiry_age_ms,
+                          bool use_reliable_transport,
+                          quicr::bytes&& data) override;
 
-  void onSubscribedObjectFragment(
-    [[maybe_unused]] const quicr::Name& quicr_name,
-    [[maybe_unused]] uint8_t priority,
-    [[maybe_unused]] uint16_t expiry_age_ms,
-    [[maybe_unused]] bool use_reliable_transport,
-    [[maybe_unused]] const uint64_t& offset,
-    [[maybe_unused]] bool is_last_fragment,
-    [[maybe_unused]] quicr::bytes&& data) override;
+  void onSubscribedObjectFragment(const quicr::Name& quicr_name,
+                                  uint8_t priority,
+                                  uint16_t expiry_age_ms,
+                                  bool use_reliable_transport,
+                                  const uint64_t& offset,
+                                  bool is_last_fragment,
+                                  quicr::bytes&& data) override;
 
 private:
   Logger& logger;
-  MLSClient* client_helper;
+  MLSClient& mls_client;
 };

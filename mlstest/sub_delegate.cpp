@@ -1,63 +1,82 @@
-#include "mls_client.h"
 #include "sub_delegate.h"
-#include <iostream>
+#include "mls_client.h"
 #include <sstream>
 
-void
-SubDelegate::onSubscribeResponse(
-  [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-  [[maybe_unused]] const quicr::SubscribeResult& result)
+SubDelegate::SubDelegate(MLSClient& mls_client_in, Logger& logger_in)
+  : logger(logger_in)
+  , mls_client(mls_client_in)
 {
+}
 
+void
+SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
+                                 const quicr::SubscribeResult& result)
+{
   std::stringstream log_msg;
-  log_msg << "onSubscriptionResponse: name: " << quicr_namespace.to_hex() << "/"
-          << int(quicr_namespace.length())
-          << " status: " << int(static_cast<uint8_t>(result.status));
+  log_msg << "onSubscriptionResponse: ns: " << quicr_namespace.to_hex()
+          << " status: " << static_cast<int>(result.status);
 
   logger.log(qtransport::LogLevel::info, log_msg.str());
 }
 
 void
 SubDelegate::onSubscriptionEnded(
-  [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-  [[maybe_unused]] const quicr::SubscribeResult::SubscribeStatus& reason)
+  const quicr::Namespace& quicr_namespace,
+  const quicr::SubscribeResult::SubscribeStatus& reason)
 
 {
-
   std::stringstream log_msg;
-  log_msg << "onSubscriptionEnded: name: " << quicr_namespace.to_hex() << "/"
-          << int(quicr_namespace.length());
+  log_msg << "onSubscriptionEnded: ns: " << quicr_namespace.to_hex() << "/"
+          << int(quicr_namespace.length())
+          << " reason: " << static_cast<int>(reason);
 
   logger.log(qtransport::LogLevel::info, log_msg.str());
 }
 
 void
-SubDelegate::onSubscribedObject([[maybe_unused]] const quicr::Name& quicr_name,
-                                [[maybe_unused]] uint8_t priority,
-                                [[maybe_unused]] uint16_t expiry_age_ms,
-                                [[maybe_unused]] bool use_reliable_transport,
-                                [[maybe_unused]] quicr::bytes&& data)
+SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
+                                uint8_t /* priority */,
+                                uint16_t /* expiry_age_ms */,
+                                bool /* use_reliable_transport */,
+                                quicr::bytes&& data)
 {
   std::stringstream log_msg;
-  std::cerr << "onSubscribedObject" << std::endl;
   log_msg << "recv object: name: " << quicr_name.to_hex()
           << " data sz: " << data.size();
 
-  if (data.size())
+  if (!data.empty()) {
     log_msg << " data: " << data.data();
+  } else {
+    log_msg << " (no data)";
+  }
 
   logger.log(qtransport::LogLevel::info, log_msg.str());
-  client_helper->handle(quicr_name, std::move(data));
+  mls_client.handle(quicr_name, std::move(data));
 }
 
 void
-SubDelegate::onSubscribedObjectFragment(
-  [[maybe_unused]] const quicr::Name& quicr_name,
-  [[maybe_unused]] uint8_t priority,
-  [[maybe_unused]] uint16_t expiry_age_ms,
-  [[maybe_unused]] bool use_reliable_transport,
-  [[maybe_unused]] const uint64_t& offset,
-  [[maybe_unused]] bool is_last_fragment,
-  [[maybe_unused]] quicr::bytes&& data)
+SubDelegate::onSubscribedObjectFragment(const quicr::Name& quicr_name,
+                                        uint8_t /* priority */,
+                                        uint16_t /* expiry_age_ms */,
+                                        bool /* use_reliable_transport */,
+                                        const uint64_t& offset,
+                                        bool is_last_fragment,
+                                        quicr::bytes&& data)
 {
+  std::stringstream log_msg;
+  log_msg << "recv object: name: " << quicr_name.to_hex()
+          << " fragment no: " << offset
+          << (is_last_fragment ? "(final)" : "(non-final)")
+          << " data sz: " << data.size();
+
+  if (!data.empty()) {
+    log_msg << " data: " << data.data();
+  } else {
+    log_msg << " (no data)";
+  }
+
+  logger.log(qtransport::LogLevel::info, log_msg.str());
+
+  // TODO(RLB): Handle fragmented objects.
+  // XXX(RLB): Why doean't libquicr handle reassembly??
 }

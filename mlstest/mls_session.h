@@ -18,20 +18,17 @@ struct MLSInitInfo
 
   // XXX(RLB): This should be deleted ASAP
   MLSInitInfo() = default;
-  MLSInitInfo(mls::CipherSuite suite,
-              std::string user_id);
+  MLSInitInfo(mls::CipherSuite suite, std::string user_id);
 };
 
 class MLSSession
 {
 public:
   // setup mls state for the creator
-  static MLSSession create(const MLSInitInfo& info,
-                           const bytes& group_id);
+  static MLSSession create(const MLSInitInfo& info, const bytes& group_id);
 
   // setup mls state for the joiners
-  static MLSSession join(const MLSInitInfo& info,
-                         const bytes& welcome_data);
+  static MLSSession join(const MLSInitInfo& info, const bytes& welcome_data);
 
   // group creator
   std::tuple<bytes, bytes> add(const bytes& key_package_data);

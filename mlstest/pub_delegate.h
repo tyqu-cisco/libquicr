@@ -1,10 +1,16 @@
 #pragma once
-#include "../include/quicr/quicr_client.h"
+#include "logger.h"
+#include <quicr/quicr_client_delegate.h>
 
 class PubDelegate : public quicr::PublisherDelegate
 {
 public:
+  PubDelegate(Logger& logger_in);
+
   void onPublishIntentResponse(
-    [[maybe_unused]] const quicr::Namespace& quicr_namespace,
-    [[maybe_unused]] const quicr::PublishIntentResult& result);
+    const quicr::Namespace& quicr_namespace,
+    const quicr::PublishIntentResult& result) override;
+
+private:
+  Logger& logger;
 };
