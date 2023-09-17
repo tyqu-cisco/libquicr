@@ -1,5 +1,5 @@
 #pragma once
-#include "logger.h"
+#include <cantina/logger.h>
 #include <quicr/quicr_client_delegate.h>
 
 class MLSClient;
@@ -7,7 +7,7 @@ class MLSClient;
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(MLSClient& mls_client_in, Logger& logger_in);
+  SubDelegate(MLSClient& mls_client_in, cantina::LoggerPointer logger_in);
 
   void onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                            const quicr::SubscribeResult& result) override;
@@ -31,6 +31,6 @@ public:
                                   quicr::bytes&& data) override;
 
 private:
-  Logger& logger;
+  cantina::LoggerPointer logger;
   MLSClient& mls_client;
 };

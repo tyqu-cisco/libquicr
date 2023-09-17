@@ -16,7 +16,7 @@ ${BIN}: ${BUILD_DIR} *.cpp
 	cmake --build ${BUILD_DIR}
 
 ${BUILD_DIR}: CMakeLists.txt
-	cmake -B${BUILD_DIR} -S${SOURCE_DIR} -DCMAKE_BUILD_TYPE=Debug
+	cmake -B${BUILD_DIR} -S${SOURCE_DIR} -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DQUICR_BUILD_TESTS=ON
 
 run: ${BIN}
 	${BIN}

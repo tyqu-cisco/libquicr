@@ -184,10 +184,7 @@ ServerRawSession::sendNamedObject(const uint64_t& subscriber_id,
                                   uint16_t expiry_age_ms,
                                   const messages::PublishDatagram& datagram)
 {
-  log_handler.log(qtransport::LogLevel::info, "num subscribe_id_state "+ std::to_string(subscribe_id_state.size()));
   // start populating message to encode
-  log_handler.log(qtransport::LogLevel::info, "count of sub_id " + std::to_string(subscribe_id_state.count(subscriber_id)));
-
   if (subscribe_id_state.count(subscriber_id) == 0) {
     logger->info << "Send Object, missing subscriber_id: " << subscriber_id
                  << std::flush;
@@ -231,9 +228,6 @@ ServerRawSession::handle_subscribe(
 
     subscribe_state[subscribe.quicr_namespace][context_id] = context;
     subscribe_id_state[context.subscriber_id] = context;
-    log_handler.log(qtransport::LogLevel::info, "Context "
-                                                  + std::to_string( subscribe_id_state[context.subscriber_id].subscriber_id));
-
   }
 
   auto& context = subscribe_state[subscribe.quicr_namespace][context_id];

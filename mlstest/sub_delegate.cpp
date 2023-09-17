@@ -2,8 +2,9 @@
 #include "mls_client.h"
 #include <sstream>
 
-SubDelegate::SubDelegate(MLSClient& mls_client_in, Logger& logger_in)
-  : logger(logger_in)
+SubDelegate::SubDelegate(MLSClient& mls_client_in,
+                         cantina::LoggerPointer logger_in)
+  : logger(std::move(logger_in))
   , mls_client(mls_client_in)
 {
 }
@@ -13,10 +14,10 @@ SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                                  const quicr::SubscribeResult& result)
 {
   std::stringstream log_msg;
-  log_msg << "onSubscriptionResponse: ns: " << quicr_namespace.to_hex()
+  log_msg << "onSubscriptionResponse: ns: " << quicr_namespace
           << " status: " << static_cast<int>(result.status);
 
-  logger.log(qtransport::LogLevel::info, log_msg.str());
+  logger->Log(log_msg.str());
 }
 
 void
@@ -26,11 +27,10 @@ SubDelegate::onSubscriptionEnded(
 
 {
   std::stringstream log_msg;
-  log_msg << "onSubscriptionEnded: ns: " << quicr_namespace.to_hex() << "/"
-          << int(quicr_namespace.length())
+  log_msg << "onSubscriptionEnded: ns: " << quicr_namespace
           << " reason: " << static_cast<int>(reason);
 
-  logger.log(qtransport::LogLevel::info, log_msg.str());
+  logger->Log(log_msg.str());
 }
 
 void
@@ -41,8 +41,7 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
                                 quicr::bytes&& data)
 {
   std::stringstream log_msg;
-  log_msg << "recv object: name: " << quicr_name.to_hex()
-          << " data sz: " << data.size();
+  log_msg << "recv object: name: " << quicr_name << " data sz: " << data.size();
 
   if (!data.empty()) {
     log_msg << " data: " << data.data();
@@ -50,7 +49,7 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
     log_msg << " (no data)";
   }
 
-  logger.log(qtransport::LogLevel::info, log_msg.str());
+  logger->Log(log_msg.str());
   mls_client.handle(quicr_name, std::move(data));
 }
 
@@ -64,8 +63,7 @@ SubDelegate::onSubscribedObjectFragment(const quicr::Name& quicr_name,
                                         quicr::bytes&& data)
 {
   std::stringstream log_msg;
-  log_msg << "recv object: name: " << quicr_name.to_hex()
-          << " fragment no: " << offset
+  log_msg << "recv object: name: " << quicr_name << " fragment no: " << offset
           << (is_last_fragment ? "(final)" : "(non-final)")
           << " data sz: " << data.size();
 
@@ -75,7 +73,7 @@ SubDelegate::onSubscribedObjectFragment(const quicr::Name& quicr_name,
     log_msg << " (no data)";
   }
 
-  logger.log(qtransport::LogLevel::info, log_msg.str());
+  logger->Log(log_msg.str());
 
   // TODO(RLB): Handle fragmented objects.
   // XXX(RLB): Why doean't libquicr handle reassembly??

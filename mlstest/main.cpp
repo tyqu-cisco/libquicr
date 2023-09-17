@@ -1,7 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "logger.h"
 #include "mls_client.h"
 #include "namespace_config.h"
 
@@ -9,7 +8,7 @@
 
 TEST_CASE("Two person test using quicr and mls")
 {
-  auto logger = Logger{};
+  const auto logger = std::make_shared<cantina::Logger>(true);
   const auto ns_config = NamespaceConfig::create_default();
 
   const auto* relay_var = getenv("MLS_RELAY");
@@ -20,7 +19,7 @@ TEST_CASE("Two person test using quicr and mls")
   const auto relay = quicr::RelayInfo{
     .hostname = hostname,
     .port = port,
-    .proto = quicr::RelayInfo::Protocol::UDP,
+    .proto = quicr::RelayInfo::Protocol::QUIC,
   };
 
   // Initialize two users
@@ -49,26 +48,22 @@ TEST_CASE("Two person test using quicr and mls")
   for (const auto& ns : namespaces) {
     if (ns != ns_config.welcome) {
       creator.subscribe(ns);
-      logger.log(qtransport::LogLevel::info,
-                 "Creator, Subscribing  to namespace " + ns.to_hex());
+      logger->Log("Creator, Subscribing  to namespace " + std::string(ns));
     }
     joiner.subscribe(ns);
-    logger.log(qtransport::LogLevel::info,
-               "Subscribing to namespace " + ns.to_hex());
+    logger->Log("Subscribing to namespace " + std::string(ns));
   }
 
   // Joiner publishes KeyPackage
   auto name = ns_config.key_package.name();
-  logger.log(qtransport::LogLevel::info, "Publishing to " + name.to_hex());
+  logger->Log("Publishing to " + std::string(name));
   joiner.join(name);
 
   std::this_thread::sleep_for(std::chrono::seconds(10));
-  logger.log(qtransport::LogLevel::info,
-             "Sleeping for 10 seconds for mls handshake to complete");
+  logger->Log("Sleeping for 10 seconds for mls handshake to complete");
 
   CHECK_EQ(creator.session().get_state(), joiner.session().get_state());
 
   std::this_thread::sleep_for(std::chrono::seconds(5));
-  logger.log(qtransport::LogLevel::info,
-             "Sleeping for 5 seconds before unsubscribing");
+  logger->Log("Sleeping for 5 seconds before unsubscribing");
 }

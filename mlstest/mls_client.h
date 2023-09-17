@@ -1,13 +1,14 @@
 #pragma once
 
-#include <map>
-#include <memory>
-
-#include "logger.h"
 #include "mls_session.h"
 #include "sub_delegate.h"
+
+#include <cantina/logger.h>
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
+
+#include <map>
+#include <memory>
 
 class MLSClient
 {
@@ -15,7 +16,7 @@ public:
   struct Config
   {
     const std::string user_id;
-    Logger& logger;
+    cantina::LoggerPointer logger;
     bool is_creator;
     quicr::RelayInfo relay;
   };
@@ -38,7 +39,7 @@ public:
 private:
   mls::CipherSuite suite{ mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
 
-  Logger& logger;
+  cantina::LoggerPointer logger;
 
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
