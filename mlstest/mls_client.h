@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mls_session.h"
+#include "namespace_config.h"
 #include "sub_delegate.h"
 
 #include <cantina/logger.h>
@@ -23,6 +24,9 @@ public:
 
   MLSClient(const Config& config);
 
+  // Connect to the server and make subscriptions
+  bool connect(std::string user_id, bool as_creator);
+
   // Control publications and subscriptions
   void subscribe(quicr::Namespace nspace);
   void unsubscribe(quicr::Namespace nspace);
@@ -41,6 +45,7 @@ private:
 
   cantina::LoggerPointer logger;
 
+  NamespaceConfig namespaces;
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 

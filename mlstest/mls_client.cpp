@@ -1,5 +1,4 @@
 #include "mls_client.h"
-#include "namespace_config.h"
 #include "pub_delegate.h"
 #include "sub_delegate.h"
 
@@ -14,6 +13,7 @@ static const uint16_t default_ttl_ms = 1000;
 
 MLSClient::MLSClient(const Config& config)
   : logger(config.logger)
+  , namespaces(NamespaceConfig::create_default())
 {
   // Set up Quicr relay connection
   logger->Log("Connecting to " + config.relay.hostname + ":" +
@@ -25,19 +25,31 @@ MLSClient::MLSClient(const Config& config)
   // fixed, we can remove this copy.
   auto relay_copy = config.relay;
   client = std::make_unique<quicr::QuicRClient>(relay_copy, tcfg, logger);
+}
 
+bool
+MLSClient::connect(std::string user_id, bool as_creator)
+{
+  // Connect to the quicr relay
   if (!client->connect()) {
-    throw std::runtime_error("Unable to establish Quicr relay connection");
+    return false;
   }
 
   // Initialize MLS state
-  const auto init_info = MLSInitInfo{ suite, config.user_id };
-  if (config.is_creator) {
+  const auto init_info = MLSInitInfo{ suite, std::move(user_id) };
+  if (as_creator) {
     const auto group_id = from_ascii("asdf"); // TODO(RLB): Set group ID
     mls_session = MLSSession::create(init_info, group_id);
   } else {
     mls_session = init_info;
   }
+
+  // Subscribe to the required namespaces
+  subscribe(namespaces.key_package);
+  subscribe(namespaces.welcome);
+  subscribe(namespaces.commit);
+
+  return true;
 }
 
 void
@@ -101,10 +113,7 @@ MLSClient::publish(quicr::Namespace& ns, bytes&& data)
 void
 MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 {
-  const auto ns = quicr::Namespace(name, 80);
-  const auto namespaces = NamespaceConfig::create_default();
-
-  if (ns == namespaces.key_package) {
+  if (namespaces.key_package.contains(name)) {
     if (!joined()) {
       logger->Log("Omit Key Package processing if not joined to the group");
       return;
@@ -123,7 +132,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
     return;
   }
 
-  if (ns == namespaces.welcome) {
+  if (namespaces.welcome.contains(name)) {
     logger->Log(
       "Received Welcome message from the creator. Processing it now ");
 
@@ -136,7 +145,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
     return;
   }
 
-  if (ns == namespaces.commit) {
+  if (namespaces.commit.contains(name)) {
     logger->Log("Commit message process is not implemented");
   }
 }

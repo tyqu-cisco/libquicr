@@ -24,35 +24,20 @@ TEST_CASE("Two person test using quicr and mls")
 
   // Initialize two users
   const auto creator_config = MLSClient::Config{
-    .user_id = "FFF000",
     .logger = logger,
-    .is_creator = true,
     .relay = relay,
   };
   auto creator = MLSClient{ creator_config };
 
   const auto joiner_config = MLSClient::Config{
-    .user_id = "FFF001",
     .logger = logger,
-    .is_creator = false,
     .relay = relay,
   };
   auto joiner = MLSClient{ joiner_config };
 
-  // Subscribe to the relevant namespaces
-  const auto namespaces = std::vector<quicr::Namespace>{
-    ns_config.key_package,
-    ns_config.welcome,
-    ns_config.commit,
-  };
-  for (const auto& ns : namespaces) {
-    if (ns != ns_config.welcome) {
-      creator.subscribe(ns);
-      logger->Log("Creator, Subscribing  to namespace " + std::string(ns));
-    }
-    joiner.subscribe(ns);
-    logger->Log("Subscribing to namespace " + std::string(ns));
-  }
+  // Connect the two clients
+  creator.connect("FFF000", true);
+  joiner.connect("FFF001", false);
 
   // Joiner publishes KeyPackage
   auto name = ns_config.key_package.name();
