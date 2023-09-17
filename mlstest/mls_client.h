@@ -16,24 +16,26 @@ class MLSClient
 public:
   struct Config
   {
-    const std::string user_id;
+    uint64_t group_id;
+    uint32_t user_id;
     cantina::LoggerPointer logger;
-    bool is_creator;
     quicr::RelayInfo relay;
   };
 
   MLSClient(const Config& config);
 
   // Connect to the server and make subscriptions
-  bool connect(std::string user_id, bool as_creator);
+  bool connect(bool as_creator);
 
   // Control publications and subscriptions
   void subscribe(quicr::Namespace nspace);
   void unsubscribe(quicr::Namespace nspace);
-  void publish(quicr::Namespace& nspace, bytes&& data);
+  void publish(const quicr::Namespace& ns,
+               const quicr::Name& name,
+               bytes&& data);
 
   // MLS operations
-  void join(quicr::Name& name);
+  void join();
   void handle(const quicr::Name& name, quicr::bytes&& data);
 
   // Access internal state
@@ -45,6 +47,8 @@ private:
 
   cantina::LoggerPointer logger;
 
+  uint64_t group_id;
+  uint32_t user_id;
   NamespaceConfig namespaces;
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
