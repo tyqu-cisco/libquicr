@@ -155,7 +155,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
     }
 
     default:
-      throw std::runtime_error("Illegal operation in name: " + std::to_string(op));
+      throw std::runtime_error("Illegal operation in name: " +
+                               std::to_string(op));
   }
 }
 
