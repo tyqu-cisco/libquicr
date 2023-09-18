@@ -6,6 +6,8 @@
 
 #include <thread>
 
+using namespace std::chrono_literals;
+
 TEST_CASE("Namespace Config")
 {
   using quicr::Namespace;
@@ -69,18 +71,18 @@ TEST_CASE("Two person test using quicr and mls")
   };
   auto joiner = MLSClient{ joiner_config };
 
-  // Connect the two clients
+  // Connect the two clients, including brief pauses to let the publishIntent
+  // responses come in
   creator.connect(true);
+  std::this_thread::sleep_for(200ms);
   joiner.connect(false);
+  std::this_thread::sleep_for(200ms);
 
   // Joiner publishes KeyPackage
   joiner.join();
 
-  std::this_thread::sleep_for(std::chrono::seconds(10));
-  logger->Log("Sleeping for 10 seconds for mls handshake to complete");
+  logger->Log("Waiting for mls handshake to complete");
+  std::this_thread::sleep_for(500ms);
 
   CHECK_EQ(creator.session().get_state(), joiner.session().get_state());
-
-  std::this_thread::sleep_for(std::chrono::seconds(5));
-  logger->Log("Sleeping for 5 seconds before unsubscribing");
 }

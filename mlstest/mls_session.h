@@ -16,16 +16,14 @@ struct MLSInitInfo
   mls::SignaturePrivateKey signature_key;
   mls::Credential credential;
 
-  // XXX(RLB): This should be deleted ASAP
-  MLSInitInfo() = default;
-  MLSInitInfo(mls::CipherSuite suite, std::string user_id);
+  MLSInitInfo(mls::CipherSuite suite, uint32_t user_id);
 };
 
 class MLSSession
 {
 public:
   // setup mls state for the creator
-  static MLSSession create(const MLSInitInfo& info, const bytes& group_id);
+  static MLSSession create(const MLSInitInfo& info, uint64_t group_id);
 
   // setup mls state for the joiners
   static MLSSession join(const MLSInitInfo& info, const bytes& welcome_data);

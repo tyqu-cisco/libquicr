@@ -27,16 +27,8 @@ public:
   // Connect to the server and make subscriptions
   bool connect(bool as_creator);
 
-  // Control publications and subscriptions
-  void subscribe(quicr::Namespace nspace);
-  void unsubscribe(quicr::Namespace nspace);
-  void publish(const quicr::Namespace& ns,
-               const quicr::Name& name,
-               bytes&& data);
-
   // MLS operations
   void join();
-  void handle(const quicr::Name& name, quicr::bytes&& data);
 
   // Access internal state
   bool joined() const;
@@ -50,8 +42,15 @@ private:
   uint64_t group_id;
   uint32_t user_id;
   NamespaceConfig namespaces;
+
+  std::variant<MLSInitInfo, MLSSession> mls_session;
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 
-  std::variant<MLSInitInfo, MLSSession> mls_session;
+  void subscribe(quicr::Namespace nspace);
+  void publish_intent(quicr::Namespace nspace);
+  void publish(const quicr::Name& name, bytes&& data);
+  void handle(const quicr::Name& name, quicr::bytes&& data);
+
+  friend class SubDelegate;
 };

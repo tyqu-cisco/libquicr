@@ -3,12 +3,12 @@
 
 using namespace mls;
 
-MLSInitInfo::MLSInitInfo(CipherSuite suite_in, std::string user_id_in)
+MLSInitInfo::MLSInitInfo(CipherSuite suite_in, uint32_t user_id_in)
   : suite(suite_in)
   , init_key(HPKEPrivateKey::generate(suite))
   , encryption_key(HPKEPrivateKey::generate(suite))
   , signature_key(SignaturePrivateKey::generate(suite))
-  , credential(Credential::basic(from_ascii(user_id_in)))
+  , credential(Credential::basic(tls::marshal(user_id_in)))
 {
   auto leaf_node = LeafNode{ suite,
                              encryption_key.public_key,
@@ -25,9 +25,9 @@ MLSInitInfo::MLSInitInfo(CipherSuite suite_in, std::string user_id_in)
 }
 
 MLSSession
-MLSSession::create(const MLSInitInfo& info, const bytes& group_id)
+MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
 {
-  auto mls_state = State{ group_id,
+  auto mls_state = State{ tls::marshal(group_id),
                           info.suite,
                           info.encryption_key,
                           info.signature_key,
