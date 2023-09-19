@@ -51,6 +51,7 @@ private:
 
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
+  bool should_commit() const;
 
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};

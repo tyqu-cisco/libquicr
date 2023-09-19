@@ -15,8 +15,7 @@ add_dependencies(${TEST_APP_NAME} quicr)
 target_link_libraries( ${TEST_APP_NAME} 
   LINK_PUBLIC
   quicr 
-  picotls-core picotls-openssl 
-  MLSPP::mlspp MLSPP::tls_syntax 
+  MLSPP::mlspp 
   doctest::doctest)
 
 # Make the compiler stricter

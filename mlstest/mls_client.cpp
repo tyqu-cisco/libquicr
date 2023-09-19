@@ -4,8 +4,6 @@
 
 #include <transport/transport.h>
 
-#include <iostream>
-#include <thread>
 #include <future>
 
 using namespace mls;
@@ -66,20 +64,38 @@ MLSClient::connect(bool as_creator)
 }
 
 bool
-MLSClient::publish_intent(quicr::Namespace ns)
+MLSClient::join()
 {
-  logger->Log("Publish Intent for namespace: " + std::string(ns));
-  auto promise = std::promise<bool>();
-  auto future = promise.get_future();
-  const auto delegate = std::make_shared<PubDelegate>(logger, std::move(promise));
+  const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
+  const auto kp_id = NamespaceConfig::id_for(kp);
+  const auto name = namespaces.for_key_package(user_id, kp_id);
 
-  client->publishIntent(delegate, ns, {}, {}, {});
+  join_promise = std::promise<bool>();
+  auto join_future = join_promise->get_future();
 
-  // XXX(RLB) `delegate` is destroyed at this point, because QuicRClient doesn't
-  // hold strong references to its delegates.  As a result, though, QuicRClient
-  // fails cleanly when its references are invalidated, and we don't need
-  // anything further from the delegate.  So we can let it go.
-  return future.get();
+  publish(name, tls::marshal(kp));
+
+  return join_future.get();
+}
+
+const MLSSession&
+MLSClient::session() const
+{
+  return std::get<MLSSession>(mls_session);
+}
+
+bool
+MLSClient::joined() const
+{
+  return std::holds_alternative<MLSSession>(mls_session);
+}
+
+bool
+MLSClient::should_commit() const
+{
+  // TODO(RLB): This method should apply some tie-breaker rule to determine who
+  // the committer is.  For example, the left-most member of the tree.
+  return true;
 }
 
 bool
@@ -112,18 +128,20 @@ MLSClient::subscribe(quicr::Namespace ns)
 }
 
 bool
-MLSClient::join()
+MLSClient::publish_intent(quicr::Namespace ns)
 {
-  const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
-  const auto kp_id = NamespaceConfig::id_for(kp);
-  const auto name = namespaces.for_key_package(user_id, kp_id);
+  logger->Log("Publish Intent for namespace: " + std::string(ns));
+  auto promise = std::promise<bool>();
+  auto future = promise.get_future();
+  const auto delegate = std::make_shared<PubDelegate>(logger, std::move(promise));
 
-  join_promise = std::promise<bool>();
-  auto join_future = join_promise->get_future();
+  client->publishIntent(delegate, ns, {}, {}, {});
 
-  publish(name, tls::marshal(kp));
-
-  return join_future.get();
+  // XXX(RLB) `delegate` is destroyed at this point, because QuicRClient doesn't
+  // hold strong references to its delegates.  As a result, though, QuicRClient
+  // fails cleanly when its references are invalidated, and we don't need
+  // anything further from the delegate.  So we can let it go.
+  return future.get();
 }
 
 void
@@ -140,10 +158,18 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 
   switch (op) {
     case NamespaceConfig::Operation::key_package: {
+      logger->Log("Received KeyPackage");
+
       if (!joined()) {
-        logger->Log("Omit Key Package processing if not joined to the group");
+        logger->Log("Ignoring KeyPackage; not joined to the group");
         return;
       }
+
+      if (!should_commit()) {
+        logger->Log("Ignoring KeyPackage; not the designated committer");
+        return;
+      }
+
       logger->Log("Received KeyPackage from participant.Add to MLS session ");
       auto& session = std::get<MLSSession>(mls_session);
       auto [welcome, commit] = session.add(std::move(data));
@@ -161,25 +187,55 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
     }
 
     case NamespaceConfig::Operation::welcome: {
-      logger->Log(
-        "Received Welcome message from the creator. Processing it now ");
+      logger->Log("Received Welcome");
 
       if (joined()) {
-        logger->Log("Omit Welcome processing if already joined to the group");
+        logger->Log("Ignoring Welcome; already joined to the group");
         return;
       }
 
       const auto& init_info = std::get<MLSInitInfo>(mls_session);
+      if (!MLSSession::welcome_match(data, init_info.key_package)) {
+        logger->Log("Ignoring Welcome; not for me");
+        return;
+      }
+
       mls_session = MLSSession::join(init_info, data);
       if (join_promise) {
         join_promise->set_value(true);
       }
 
+      // TODO(RLB): Unsubscribe from Welcome at this point
+
       return;
     }
 
     case NamespaceConfig::Operation::commit: {
-      logger->Log("Commit message process is not implemented");
+      logger->Log("Received Commit");
+
+      if (!joined()) {
+        logger->Log("Ignoring KeyPackage; not joined to the group");
+        return;
+      }
+
+      auto& session = std::get<MLSSession>(mls_session);
+      switch (session.handle(data)) {
+        case MLSSession::HandleResult::ok: {
+          logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
+          break;
+        }
+
+        case MLSSession::HandleResult::stale: {
+          logger->Log("Ignoring stale commit");
+          break;
+        }
+
+        case MLSSession::HandleResult::future: {
+          logger->Log("Ignoring commit for a future epoch");
+          break;
+        }
+      }
+
       return;
     }
 
@@ -187,16 +243,4 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       throw std::runtime_error("Illegal operation in name: " +
                                std::to_string(op));
   }
-}
-
-const MLSSession&
-MLSClient::session() const
-{
-  return std::get<MLSSession>(mls_session);
-}
-
-bool
-MLSClient::joined() const
-{
-  return std::holds_alternative<MLSSession>(mls_session);
 }

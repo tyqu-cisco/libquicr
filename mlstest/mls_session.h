@@ -22,14 +22,26 @@ struct MLSInitInfo
 class MLSSession
 {
 public:
-  // setup mls state for the creator
+  // Set up MLS state for the creator
   static MLSSession create(const MLSInitInfo& info, uint64_t group_id);
 
-  // setup mls state for the joiners
+  // Set up MLS state for a joiner
   static MLSSession join(const MLSInitInfo& info, const bytes& welcome_data);
+  static bool welcome_match(const bytes& welcome_data, const mls::KeyPackage& key_package);
 
-  // group creator
+  // Group operations
+  // TODO(RLB): Add a remove() and triggering logic
   std::tuple<bytes, bytes> add(const bytes& key_package_data);
+
+  // Commit handling
+  enum struct HandleResult : uint8_t {
+    ok,
+    stale,
+    future,
+  };
+  HandleResult handle(const bytes& commit_data);
+
+  // Access to the underlying MLS state
   const mls::State& get_state() const;
 
 private:
