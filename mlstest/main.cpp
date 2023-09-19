@@ -73,16 +73,11 @@ TEST_CASE("Two person test using quicr and mls")
 
   // Connect the two clients, including brief pauses to let the publishIntent
   // responses come in
-  creator.connect(true);
-  std::this_thread::sleep_for(200ms);
-  joiner.connect(false);
-  std::this_thread::sleep_for(200ms);
+  REQUIRE(creator.connect(true));
+  REQUIRE(joiner.connect(false));
 
   // Joiner publishes KeyPackage
   joiner.join();
-
-  logger->Log("Waiting for mls handshake to complete");
-  std::this_thread::sleep_for(500ms);
 
   CHECK_EQ(creator.session().get_state(), joiner.session().get_state());
 }

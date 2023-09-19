@@ -3,9 +3,10 @@
 #include <sstream>
 
 SubDelegate::SubDelegate(MLSClient& mls_client_in,
-                         cantina::LoggerPointer logger_in)
+                         cantina::LoggerPointer logger_in, std::promise<bool> on_response_in)
   : logger(std::move(logger_in))
   , mls_client(mls_client_in)
+  , on_response(std::move(on_response_in))
 {
 }
 
@@ -18,6 +19,11 @@ SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
           << " status: " << static_cast<int>(result.status);
 
   logger->Log(log_msg.str());
+
+  if (on_response) {
+    on_response->set_value(result.status == quicr::SubscribeResult::SubscribeStatus::Ok);
+    on_response.reset();
+  }
 }
 
 void

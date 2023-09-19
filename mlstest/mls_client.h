@@ -10,6 +10,7 @@
 
 #include <map>
 #include <memory>
+#include <future>
 
 class MLSClient
 {
@@ -28,7 +29,7 @@ public:
   bool connect(bool as_creator);
 
   // MLS operations
-  void join();
+  bool join();
 
   // Access internal state
   bool joined() const;
@@ -43,12 +44,19 @@ private:
   uint32_t user_id;
   NamespaceConfig namespaces;
 
+  struct PendingJoin {
+    MLSInitInfo init_info;
+    std::promise<bool> joined;
+  };
+
+  std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
+
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 
-  void subscribe(quicr::Namespace nspace);
-  void publish_intent(quicr::Namespace nspace);
+  bool subscribe(quicr::Namespace nspace);
+  bool publish_intent(quicr::Namespace nspace);
   void publish(const quicr::Name& name, bytes&& data);
   void handle(const quicr::Name& name, quicr::bytes&& data);
 

@@ -6,8 +6,10 @@
 
 #include <iostream>
 #include <thread>
+#include <future>
 
 using namespace mls;
+using namespace std::chrono_literals;
 
 static const uint16_t default_ttl_ms = 1000;
 
@@ -44,54 +46,84 @@ MLSClient::connect(bool as_creator)
     mls_session = MLSSession::create(init_info, group_id);
   }
 
+  // XXX(RLB) These subscriptions / publishes are done serially; we await a
+  // response for each one before doing the next.  They could be done in
+  // parallel by having subscribe/publish_intent return std::future<bool> and
+  // awaiting all of these futures together.
+
   // Subscribe to the required namespaces
-  subscribe(namespaces.key_package_sub());
-  subscribe(namespaces.welcome_sub());
-  subscribe(namespaces.commit_sub());
+  auto success = true;
+  success = success && subscribe(namespaces.key_package_sub());
+  success = success && subscribe(namespaces.welcome_sub());
+  success = success && subscribe(namespaces.commit_sub());
 
   // Announce intent to publish on this user's namespaces
-  publish_intent(namespaces.key_package_pub(user_id));
-  publish_intent(namespaces.welcome_pub(user_id));
-  publish_intent(namespaces.commit_pub(user_id));
+  success = success && publish_intent(namespaces.key_package_pub(user_id));
+  success = success && publish_intent(namespaces.welcome_pub(user_id));
+  success = success && publish_intent(namespaces.commit_pub(user_id));
 
-  return true;
+  return success;
 }
 
-void
+bool
+MLSClient::publish_intent(quicr::Namespace ns)
+{
+  logger->Log("Publish Intent for namespace: " + std::string(ns));
+  auto promise = std::promise<bool>();
+  auto future = promise.get_future();
+  const auto delegate = std::make_shared<PubDelegate>(logger, std::move(promise));
+
+  client->publishIntent(delegate, ns, {}, {}, {});
+
+  // XXX(RLB) `delegate` is destroyed at this point, because QuicRClient doesn't
+  // hold strong references to its delegates.  As a result, though, QuicRClient
+  // fails cleanly when its references are invalidated, and we don't need
+  // anything further from the delegate.  So we can let it go.
+  return future.get();
+}
+
+bool
 MLSClient::subscribe(quicr::Namespace ns)
 {
-  if (!sub_delegates.count(ns)) {
-    sub_delegates[ns] = std::make_shared<SubDelegate>(*this, logger);
+  if (sub_delegates.count(ns)) {
+    return true;
   }
 
-  logger->Log("Subscribe to " + std::string(ns));
+  auto promise = std::promise<bool>();
+  auto future = promise.get_future();
+  const auto delegate = std::make_shared<SubDelegate>(*this, logger, std::move(promise));
 
+  logger->Log("Subscribe to " + std::string(ns));
   quicr::bytes empty;
-  client->subscribe(sub_delegates[ns],
+  client->subscribe(delegate,
                     ns,
                     quicr::SubscribeIntent::immediate,
                     "origin_url",
                     false,
                     "auth_token",
                     std::move(empty));
+
+  const auto success = future.get();
+  if (success) {
+    sub_delegates.insert_or_assign(ns, delegate);
+  }
+
+  return success;
 }
 
-void
-MLSClient::publish_intent(quicr::Namespace ns)
-{
-  logger->Log("Publish Intent for namespace: " + std::string(ns));
-  const auto pd = std::make_shared<PubDelegate>(logger);
-  client->publishIntent(pd, ns, {}, {}, {});
-}
-
-void
+bool
 MLSClient::join()
 {
   const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
   const auto kp_id = NamespaceConfig::id_for(kp);
   const auto name = namespaces.for_key_package(user_id, kp_id);
 
+  join_promise = std::promise<bool>();
+  auto join_future = join_promise->get_future();
+
   publish(name, tls::marshal(kp));
+
+  return join_future.get();
 }
 
 void
@@ -136,8 +168,13 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         logger->Log("Omit Welcome processing if already joined to the group");
         return;
       }
+
       const auto& init_info = std::get<MLSInitInfo>(mls_session);
       mls_session = MLSSession::join(init_info, data);
+      if (join_promise) {
+        join_promise->set_value(true);
+      }
+
       return;
     }
 
