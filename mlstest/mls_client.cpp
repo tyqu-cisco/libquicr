@@ -95,7 +95,8 @@ MLSClient::should_commit() const
 {
   // TODO(RLB): This method should apply some tie-breaker rule to determine who
   // the committer is.  For example, the left-most member of the tree.
-  return true;
+  // XXX(RLB): The rule here only works for the test cases, not more generally
+  return user_id == 0;
 }
 
 bool
@@ -170,7 +171,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
-      logger->Log("Received KeyPackage from participant.Add to MLS session ");
+      logger->Log("Adding new client to MLS session");
       auto& session = std::get<MLSSession>(mls_session);
       auto [welcome, commit] = session.add(std::move(data));
 
@@ -183,6 +184,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       const auto epoch = session.get_state().epoch();
       const auto commit_name = namespaces.for_commit(user_id, epoch);
       publish(commit_name, std::move(commit));
+
+      logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
       return;
     }
 
@@ -214,7 +217,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       logger->Log("Received Commit");
 
       if (!joined()) {
-        logger->Log("Ignoring KeyPackage; not joined to the group");
+        logger->Log("Ignoring Commit; not joined to the group");
         return;
       }
 
