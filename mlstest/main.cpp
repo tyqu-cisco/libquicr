@@ -34,10 +34,12 @@ protected:
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
 
-  static constexpr auto user_names = std::array<const char*, 3>{
+  static constexpr auto user_names = std::array<const char*, 5>{
     "Alice",
     "Bob",
     "Charlie",
+    "Diana",
+    "Ellen",
   };
 
   MLSClient::Config next_config() {
@@ -55,16 +57,15 @@ protected:
   }
 };
 
-TEST_CASE_FIXTURE(MLSTest, "Two person test")
+TEST_CASE_FIXTURE(MLSTest, "Set up two-person MLS")
 {
   group_id = 0x32706172747921;
 
-  // Initialize two users
+  // Initialize and connect two users
   auto creator = MLSClient{ next_config() };
-  auto joiner = MLSClient{ next_config() };
-
-  // Connect the two clients
   REQUIRE(creator.connect(true));
+
+  auto joiner = MLSClient{ next_config() };
   REQUIRE(joiner.connect(false));
 
   // Joiner publishes KeyPackage
@@ -77,35 +78,33 @@ TEST_CASE_FIXTURE(MLSTest, "Two person test")
   REQUIRE(creator_epoch == joiner_epoch);
 }
 
-TEST_CASE_FIXTURE(MLSTest, "Three person test")
+TEST_CASE_FIXTURE(MLSTest, "Set up group MLS")
 {
   group_id = 0x33706172747921;
+  const auto group_size = user_names.size();
 
-  // Initialize two users
+  // Initialize and connect the creator
   auto creator = MLSClient{ next_config() };
-  auto joiner1 = MLSClient{ next_config() };
-  auto joiner2 = MLSClient{ next_config() };
+  creator.connect(true);
 
-  // Connect the two clients
-  REQUIRE(creator.connect(true));
-  REQUIRE(joiner1.connect(false));
-  REQUIRE(joiner2.connect(false));
+  // For each remaining client...
+  // (The shared_ptr is necessary to store an MLSClient in a vector, since
+  // MLSClient itself doesn't meet the requirements for MoveInsertable.)
+  auto joiners = std::vector<std::shared_ptr<MLSClient>>{};
+  for (size_t i = 1; i < group_size; i++) {
+    // Initialize
+    auto joiner = std::make_shared<MLSClient>(next_config());
+    joiners.push_back(joiner);
 
-  // Join the first user
-  REQUIRE(joiner1.join());
-  REQUIRE(joiner1.joined());
+    // Join the group
+    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->join());
+    REQUIRE(joiner->joined());
 
-  const auto creator_epoch_1 = creator.next_epoch();
-  const auto joiner1_epoch_1 = joiner1.next_epoch();
-  REQUIRE(creator_epoch_1 == joiner1_epoch_1);
-
-  // Join the second user
-  REQUIRE(joiner2.join());
-  REQUIRE(joiner2.joined());
-
-  const auto creator_epoch_2 = creator.next_epoch();
-  const auto joiner1_epoch_2 = joiner1.next_epoch();
-  const auto joiner2_epoch_2 = joiner2.next_epoch();
-  REQUIRE(creator_epoch_2 == joiner1_epoch_2);
-  REQUIRE(creator_epoch_2 == joiner2_epoch_2);
+    // Verify that all clients are in the same state
+    const auto creator_epoch = creator.next_epoch();
+    for (auto& joiner : joiners) {
+      REQUIRE(creator_epoch == joiner->next_epoch());
+    }
+  }
 }

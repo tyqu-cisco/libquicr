@@ -48,7 +48,7 @@ public:
     quicr::RelayInfo relay;
   };
 
-  MLSClient(const Config& config);
+  explicit MLSClient(const Config& config);
 
   // Connect to the server and make subscriptions
   bool connect(bool as_creator);
