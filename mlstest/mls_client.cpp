@@ -127,9 +127,9 @@ MLSClient::subscribe(quicr::Namespace ns)
   client->subscribe(delegate,
                     ns,
                     quicr::SubscribeIntent::immediate,
-                    "origin_url",
+                    "bogus_origin_url",
                     false,
-                    "auth_token",
+                    "bogus_auth_token",
                     std::move(empty));
 
   const auto success = future.get();
@@ -225,7 +225,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       const auto& session = std::get<MLSSession>(mls_session);
       epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
 
-      // TODO(RLB): Unsubscribe from Welcome at this point
+      const auto welcome_ns = namespaces.welcome_sub();
+      client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
 
       return;
     }
