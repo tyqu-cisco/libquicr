@@ -78,6 +78,12 @@ MLSClient::join()
   return join_future.get();
 }
 
+bool
+MLSClient::joined() const
+{
+  return std::holds_alternative<MLSSession>(mls_session);
+}
+
 const MLSSession&
 MLSClient::session() const
 {
@@ -85,9 +91,15 @@ MLSClient::session() const
 }
 
 bool
-MLSClient::joined() const
+operator==(const MLSClient::Epoch& lhs, const MLSClient::Epoch& rhs)
 {
-  return std::holds_alternative<MLSSession>(mls_session);
+  return lhs.epoch == rhs.epoch && lhs.epoch_authenticator == rhs.epoch_authenticator;
+}
+
+MLSClient::Epoch
+MLSClient::next_epoch()
+{
+  return epochs.pop();
 }
 
 bool
@@ -148,7 +160,7 @@ MLSClient::publish_intent(quicr::Namespace ns)
 void
 MLSClient::publish(const quicr::Name& name, bytes&& data)
 {
-  logger->Log("Publish, name=" + std::string(name));
+  logger->Log("Publish, name=" + std::string(name) + " size=" + std::to_string(data.size()));
   client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
@@ -185,6 +197,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       const auto commit_name = namespaces.for_commit(user_id, epoch);
       publish(commit_name, std::move(commit));
 
+      epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
+
       logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
       return;
     }
@@ -208,6 +222,9 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         join_promise->set_value(true);
       }
 
+      const auto& session = std::get<MLSSession>(mls_session);
+      epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
+
       // TODO(RLB): Unsubscribe from Welcome at this point
 
       return;
@@ -224,6 +241,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       auto& session = std::get<MLSSession>(mls_session);
       switch (session.handle(data)) {
         case MLSSession::HandleResult::ok: {
+          epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
           logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
           break;
         }
@@ -238,6 +256,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
           break;
         }
       }
+
 
       return;
     }

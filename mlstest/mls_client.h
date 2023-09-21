@@ -11,6 +11,31 @@
 #include <map>
 #include <memory>
 #include <future>
+#include <condition_variable>
+#include <thread>
+#include <queue>
+
+template<typename T>
+struct AsyncQueue {
+  void push(const T& val) {
+    std::unique_lock<std::mutex> lock(mutex);
+    queue.push(val);
+    lock.unlock();
+    nonempty.notify_all();
+  }
+
+  T pop() {
+    std::unique_lock<std::mutex> lock(mutex);
+    nonempty.wait(lock, [&]{ return !queue.empty(); });
+    const auto val = queue.front();
+    queue.pop();
+    return val;
+  }
+
+  std::mutex mutex;
+  std::condition_variable nonempty;
+  std::queue<T> queue;
+};
 
 class MLSClient
 {
@@ -35,6 +60,16 @@ public:
   bool joined() const;
   const MLSSession& session() const;
 
+  // Access to MLS epochs as they arrive.  This method pops a queue of epochs;
+  // if there are no epoch enqueued, it will block until one shows up.
+  struct Epoch {
+    uint64_t epoch;
+    bytes epoch_authenticator;
+
+    friend bool operator==(const Epoch& lhs, const Epoch& rhs);
+  };
+  Epoch next_epoch();
+
 private:
   mls::CipherSuite suite{ mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
 
@@ -51,6 +86,7 @@ private:
 
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
+  AsyncQueue<Epoch> epochs;
   bool should_commit() const;
 
   std::unique_ptr<quicr::QuicRClient> client;

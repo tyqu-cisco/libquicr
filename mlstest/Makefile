@@ -24,6 +24,9 @@ run: ${BIN}
 db: ${BIN}
 	lldb ${BIN}
 
+really:
+	cd ../cmd/really && ../../build/cmd/really/really
+
 clean:
 	cmake --build ${BUILD_DIR} --target clean
 

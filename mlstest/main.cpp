@@ -28,7 +28,10 @@ protected:
   const cantina::LoggerPointer logger;
   quicr::RelayInfo relay;
 
-  static const uint64_t group_id = 0x010203040506;
+  // The group_id needs to be different for different test cases.  Otherwise the
+  // relay will reject the publish intents from different clients for the same
+  // namespace.
+  uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
 
   static constexpr auto user_names = std::array<const char*, 3>{
@@ -54,6 +57,8 @@ protected:
 
 TEST_CASE_FIXTURE(MLSTest, "Two person test")
 {
+  group_id = 0x32706172747921;
+
   // Initialize two users
   auto creator = MLSClient{ next_config() };
   auto joiner = MLSClient{ next_config() };
@@ -66,11 +71,16 @@ TEST_CASE_FIXTURE(MLSTest, "Two person test")
   REQUIRE(joiner.join());
   REQUIRE(joiner.joined());
 
-  CHECK_EQ(creator.session().get_state(), joiner.session().get_state());
+  // Check that both are in the same state
+  const auto creator_epoch = creator.next_epoch();
+  const auto joiner_epoch = joiner.next_epoch();
+  REQUIRE(creator_epoch == joiner_epoch);
 }
 
 TEST_CASE_FIXTURE(MLSTest, "Three person test")
 {
+  group_id = 0x33706172747921;
+
   // Initialize two users
   auto creator = MLSClient{ next_config() };
   auto joiner1 = MLSClient{ next_config() };
@@ -84,15 +94,18 @@ TEST_CASE_FIXTURE(MLSTest, "Three person test")
   // Join the first user
   REQUIRE(joiner1.join());
   REQUIRE(joiner1.joined());
-  CHECK_EQ(creator.session().get_state(), joiner1.session().get_state());
+
+  const auto creator_epoch_1 = creator.next_epoch();
+  const auto joiner1_epoch_1 = joiner1.next_epoch();
+  REQUIRE(creator_epoch_1 == joiner1_epoch_1);
 
   // Join the second user
   REQUIRE(joiner2.join());
   REQUIRE(joiner2.joined());
 
-  // XXX pause for commit processing
-  std::this_thread::sleep_for(2000ms);
-
-  CHECK_EQ(creator.session().get_state(), joiner1.session().get_state());
-  CHECK_EQ(creator.session().get_state(), joiner2.session().get_state());
+  const auto creator_epoch_2 = creator.next_epoch();
+  const auto joiner1_epoch_2 = joiner1.next_epoch();
+  const auto joiner2_epoch_2 = joiner2.next_epoch();
+  REQUIRE(creator_epoch_2 == joiner1_epoch_2);
+  REQUIRE(creator_epoch_2 == joiner2_epoch_2);
 }
