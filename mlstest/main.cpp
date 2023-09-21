@@ -35,16 +35,14 @@ protected:
   uint32_t next_user_id = 0x00000000;
 
   static constexpr auto user_names = std::array<const char*, 5>{
-    "Alice",
-    "Bob",
-    "Charlie",
-    "Diana",
-    "Ellen",
+    "Alice", "Bob", "Charlie", "Diana", "Ellen",
   };
 
-  MLSClient::Config next_config() {
+  MLSClient::Config next_config()
+  {
     const auto* user_name = user_names.at(next_user_id);
-    const auto user_logger = std::make_shared<cantina::Logger>(user_name, logger, true);
+    const auto user_logger =
+      std::make_shared<cantina::Logger>(user_name, logger, true);
     const auto config = MLSClient::Config{
       .group_id = group_id,
       .user_id = next_user_id,

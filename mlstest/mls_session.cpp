@@ -27,12 +27,9 @@ MLSInitInfo::MLSInitInfo(CipherSuite suite_in, uint32_t user_id_in)
 MLSSession
 MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
 {
-  auto mls_state = State{ tls::marshal(group_id),
-                          info.suite,
-                          info.encryption_key,
-                          info.signature_key,
-                          info.key_package.leaf_node,
-                          {} };
+  auto mls_state = State{ tls::marshal(group_id),     info.suite,
+                          info.encryption_key,        info.signature_key,
+                          info.key_package.leaf_node, {} };
   return { std::move(mls_state) };
 }
 
@@ -51,7 +48,8 @@ MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
 }
 
 bool
-MLSSession::welcome_match(const bytes& welcome_data, const KeyPackage& key_package)
+MLSSession::welcome_match(const bytes& welcome_data,
+                          const KeyPackage& key_package)
 {
   const auto welcome = tls::get<Welcome>(welcome_data);
   return welcome.find(key_package).has_value();

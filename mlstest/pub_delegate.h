@@ -7,7 +7,8 @@
 class PubDelegate : public quicr::PublisherDelegate
 {
 public:
-  PubDelegate(cantina::LoggerPointer logger_in, std::promise<bool> on_response_in);
+  PubDelegate(cantina::LoggerPointer logger_in,
+              std::promise<bool> on_response_in);
 
   void onPublishIntentResponse(
     const quicr::Namespace& quicr_namespace,

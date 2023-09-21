@@ -8,6 +8,9 @@ TODO
     * Basically just expose join()
 * [X] Fix namespace scheme
 * [X] Handle commits so that multiple members can join
-* [ ] Unsubscribe from welcome channel after being welcomed
+* [X] Unsubscribe from welcome channel after being welcomed
 * [ ] Provide some facility for leaving / being removed
+* [ ] Add a reordering queue for MLS commits
+* [ ] Generalize the committer selection rule so that it's not just index==0
+* [ ] Add a stub "epoch server"
 

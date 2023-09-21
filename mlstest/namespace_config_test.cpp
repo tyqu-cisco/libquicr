@@ -30,4 +30,3 @@ TEST_CASE("Namespace Config")
   REQUIRE(namespaces.for_commit(user_id, third_value) ==
           0x01020304050607030a0b0c0df0f1f2f3_name);
 }
-

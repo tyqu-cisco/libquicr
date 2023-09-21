@@ -8,25 +8,28 @@
 #include <quicr/quicr_client.h>
 #include <quicr/quicr_common.h>
 
+#include <condition_variable>
+#include <future>
 #include <map>
 #include <memory>
-#include <future>
-#include <condition_variable>
-#include <thread>
 #include <queue>
+#include <thread>
 
 template<typename T>
-struct AsyncQueue {
-  void push(const T& val) {
+struct AsyncQueue
+{
+  void push(const T& val)
+  {
     std::unique_lock<std::mutex> lock(mutex);
     queue.push(val);
     lock.unlock();
     nonempty.notify_all();
   }
 
-  T pop() {
+  T pop()
+  {
     std::unique_lock<std::mutex> lock(mutex);
-    nonempty.wait(lock, [&]{ return !queue.empty(); });
+    nonempty.wait(lock, [&] { return !queue.empty(); });
     const auto val = queue.front();
     queue.pop();
     return val;
@@ -62,7 +65,8 @@ public:
 
   // Access to MLS epochs as they arrive.  This method pops a queue of epochs;
   // if there are no epoch enqueued, it will block until one shows up.
-  struct Epoch {
+  struct Epoch
+  {
     uint64_t epoch;
     bytes epoch_authenticator;
 
@@ -79,7 +83,8 @@ private:
   uint32_t user_id;
   NamespaceConfig namespaces;
 
-  struct PendingJoin {
+  struct PendingJoin
+  {
     MLSInitInfo init_info;
     std::promise<bool> joined;
   };

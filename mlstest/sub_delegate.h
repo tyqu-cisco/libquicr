@@ -9,7 +9,9 @@ class MLSClient;
 class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
-  SubDelegate(MLSClient& mls_client_in, cantina::LoggerPointer logger_in, std::promise<bool> on_response_in);
+  SubDelegate(MLSClient& mls_client_in,
+              cantina::LoggerPointer logger_in,
+              std::promise<bool> on_response_in);
 
   void onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                            const quicr::SubscribeResult& result) override;

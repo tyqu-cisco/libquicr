@@ -27,14 +27,16 @@ public:
 
   // Set up MLS state for a joiner
   static MLSSession join(const MLSInitInfo& info, const bytes& welcome_data);
-  static bool welcome_match(const bytes& welcome_data, const mls::KeyPackage& key_package);
+  static bool welcome_match(const bytes& welcome_data,
+                            const mls::KeyPackage& key_package);
 
   // Group operations
   // TODO(RLB): Add a remove() and triggering logic
   std::tuple<bytes, bytes> add(const bytes& key_package_data);
 
   // Commit handling
-  enum struct HandleResult : uint8_t {
+  enum struct HandleResult : uint8_t
+  {
     ok,
     stale,
     future,

@@ -93,7 +93,8 @@ MLSClient::session() const
 bool
 operator==(const MLSClient::Epoch& lhs, const MLSClient::Epoch& rhs)
 {
-  return lhs.epoch == rhs.epoch && lhs.epoch_authenticator == rhs.epoch_authenticator;
+  return lhs.epoch == rhs.epoch &&
+         lhs.epoch_authenticator == rhs.epoch_authenticator;
 }
 
 MLSClient::Epoch
@@ -120,7 +121,8 @@ MLSClient::subscribe(quicr::Namespace ns)
 
   auto promise = std::promise<bool>();
   auto future = promise.get_future();
-  const auto delegate = std::make_shared<SubDelegate>(*this, logger, std::move(promise));
+  const auto delegate =
+    std::make_shared<SubDelegate>(*this, logger, std::move(promise));
 
   logger->Log("Subscribe to " + std::string(ns));
   quicr::bytes empty;
@@ -146,7 +148,8 @@ MLSClient::publish_intent(quicr::Namespace ns)
   logger->Log("Publish Intent for namespace: " + std::string(ns));
   auto promise = std::promise<bool>();
   auto future = promise.get_future();
-  const auto delegate = std::make_shared<PubDelegate>(logger, std::move(promise));
+  const auto delegate =
+    std::make_shared<PubDelegate>(logger, std::move(promise));
 
   client->publishIntent(delegate, ns, {}, {}, {});
 
@@ -160,7 +163,8 @@ MLSClient::publish_intent(quicr::Namespace ns)
 void
 MLSClient::publish(const quicr::Name& name, bytes&& data)
 {
-  logger->Log("Publish, name=" + std::string(name) + " size=" + std::to_string(data.size()));
+  logger->Log("Publish, name=" + std::string(name) +
+              " size=" + std::to_string(data.size()));
   client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
@@ -197,9 +201,11 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       const auto commit_name = namespaces.for_commit(user_id, epoch);
       publish(commit_name, std::move(commit));
 
-      epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
+      epochs.push({ session.get_state().epoch(),
+                    session.get_state().epoch_authenticator() });
 
-      logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
+      logger->Log("Updated to epoch " +
+                  std::to_string(session.get_state().epoch()));
       return;
     }
 
@@ -223,7 +229,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       }
 
       const auto& session = std::get<MLSSession>(mls_session);
-      epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
+      epochs.push({ session.get_state().epoch(),
+                    session.get_state().epoch_authenticator() });
 
       const auto welcome_ns = namespaces.welcome_sub();
       client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
@@ -242,8 +249,10 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       auto& session = std::get<MLSSession>(mls_session);
       switch (session.handle(data)) {
         case MLSSession::HandleResult::ok: {
-          epochs.push({ session.get_state().epoch(), session.get_state().epoch_authenticator() });
-          logger->Log("Updated to epoch " + std::to_string(session.get_state().epoch()));
+          epochs.push({ session.get_state().epoch(),
+                        session.get_state().epoch_authenticator() });
+          logger->Log("Updated to epoch " +
+                      std::to_string(session.get_state().epoch()));
           break;
         }
 
@@ -257,7 +266,6 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
           break;
         }
       }
-
 
       return;
     }
