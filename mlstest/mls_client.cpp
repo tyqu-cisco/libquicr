@@ -54,11 +54,13 @@ MLSClient::connect(bool as_creator)
   success = success && subscribe(namespaces.key_package_sub());
   success = success && subscribe(namespaces.welcome_sub());
   success = success && subscribe(namespaces.commit_sub());
+  success = success && subscribe(namespaces.leave_sub());
 
   // Announce intent to publish on this user's namespaces
   success = success && publish_intent(namespaces.key_package_pub(user_id));
   success = success && publish_intent(namespaces.welcome_pub(user_id));
   success = success && publish_intent(namespaces.commit_pub(user_id));
+  success = success && publish_intent(namespaces.leave_pub(user_id));
 
   return success;
 }
@@ -78,6 +80,14 @@ MLSClient::join()
   return join_future.get();
 }
 
+void
+MLSClient::leave()
+{
+  auto self_remove = std::get<MLSSession>(mls_session).leave();
+  const auto name = namespaces.for_leave(user_id);
+  publish(name, std::move(self_remove));
+}
+
 bool
 MLSClient::joined() const
 {
@@ -94,6 +104,7 @@ bool
 operator==(const MLSClient::Epoch& lhs, const MLSClient::Epoch& rhs)
 {
   return lhs.epoch == rhs.epoch &&
+         lhs.member_count == rhs.member_count &&
          lhs.epoch_authenticator == rhs.epoch_authenticator;
 }
 
@@ -189,7 +200,13 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 
       logger->Log("Adding new client to MLS session");
       auto& session = std::get<MLSSession>(mls_session);
-      auto [welcome, commit] = session.add(std::move(data));
+      auto maybe_welcome_commit = session.add(sender, data);
+      if (!maybe_welcome_commit) {
+        logger->Log("Add failed");
+        return;
+      }
+
+      auto [welcome, commit] = maybe_welcome_commit.value();
 
       logger->Log("Publishing Welcome Message ");
       const auto welcome_name =
@@ -202,6 +219,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       publish(commit_name, std::move(commit));
 
       epochs.push({ session.get_state().epoch(),
+                    session.member_count(),
                     session.get_state().epoch_authenticator() });
 
       logger->Log("Updated to epoch " +
@@ -218,23 +236,62 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       }
 
       const auto& init_info = std::get<MLSInitInfo>(mls_session);
-      if (!MLSSession::welcome_match(data, init_info.key_package)) {
+      const auto maybe_mls_session = MLSSession::join(init_info, data);
+      if (!maybe_mls_session) {
         logger->Log("Ignoring Welcome; not for me");
         return;
       }
 
-      mls_session = MLSSession::join(init_info, data);
+      mls_session = maybe_mls_session.value();
       if (join_promise) {
         join_promise->set_value(true);
       }
 
       const auto& session = std::get<MLSSession>(mls_session);
       epochs.push({ session.get_state().epoch(),
+                    session.member_count(),
                     session.get_state().epoch_authenticator() });
 
       const auto welcome_ns = namespaces.welcome_sub();
       client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
 
+      return;
+    }
+
+    case NamespaceConfig::Operation::leave: {
+      logger->Log("Received Leave");
+
+      if (!joined()) {
+        logger->Log("Ignoring Leave; not joined to the group");
+        return;
+      }
+
+      if (!should_commit()) {
+        logger->Log("Ignoring Leave; not the designated committer");
+        return;
+      }
+
+      logger->Log("Removing client from MLS session");
+      auto& session = std::get<MLSSession>(mls_session);
+      auto maybe_commit = session.remove(sender, data);
+      if (!maybe_commit) {
+        logger->Log("Remove failed");
+        return;
+      }
+
+      auto commit = maybe_commit.value();
+
+      logger->Log("Publishing Commit Message");
+      const auto epoch = session.get_state().epoch();
+      const auto commit_name = namespaces.for_commit(user_id, epoch);
+      publish(commit_name, std::move(commit));
+
+      epochs.push({ session.get_state().epoch(),
+                    session.member_count(),
+                    session.get_state().epoch_authenticator() });
+
+      logger->Log("Updated to epoch " +
+                  std::to_string(session.get_state().epoch()));
       return;
     }
 
@@ -250,6 +307,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       switch (session.handle(data)) {
         case MLSSession::HandleResult::ok: {
           epochs.push({ session.get_state().epoch(),
+                        session.member_count(),
                         session.get_state().epoch_authenticator() });
           logger->Log("Updated to epoch " +
                       std::to_string(session.get_state().epoch()));

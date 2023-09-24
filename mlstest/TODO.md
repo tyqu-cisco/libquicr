@@ -13,4 +13,4 @@ TODO
 * [ ] Add a reordering queue for MLS commits
 * [ ] Generalize the committer selection rule so that it's not just index==0
 * [ ] Add a stub "epoch server"
-
+* [ ] Encrypt MLS messages

@@ -58,6 +58,7 @@ public:
 
   // MLS operations
   bool join();
+  void leave();
 
   // Access internal state
   bool joined() const;
@@ -68,6 +69,7 @@ public:
   struct Epoch
   {
     uint64_t epoch;
+    size_t member_count;
     bytes epoch_authenticator;
 
     friend bool operator==(const Epoch& lhs, const Epoch& rhs);

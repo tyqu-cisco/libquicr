@@ -45,8 +45,19 @@
 //   * Publish intent for group_id/03/sender/*
 // * On commit:
 //   * Send Welcome to group_id/03/sender/epoch
+//
+// For requesting to be removed from the group:
+//
+//        group_id       op    sender        0
+//  -------------------- -- ----------- -----------
+// |XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|XX|
+//
+// * On connect:
+//   * Subscribe to group_id/04/*
+//   * Publish intent for group_id/04/sender/*
+// * On leave:
+//   * Send Welcome to group_id/04/sender/0
 
-// XXX(RLB): It would be nice if namespaces were extensible.
 struct SubNamespace
 {
   quicr::Namespace ns;
@@ -73,23 +84,27 @@ struct NamespaceConfig
     static const Type key_package = 0x01;
     static const Type welcome = 0x02;
     static const Type commit = 0x03;
+    static const Type leave = 0x04;
   };
 
   // Namespaces to subscribe to
   quicr::Namespace key_package_sub() const;
   quicr::Namespace welcome_sub() const;
   quicr::Namespace commit_sub() const;
+  quicr::Namespace leave_sub() const;
 
   // Namespaces to publish within
   quicr::Namespace key_package_pub(uint32_t sender) const;
   quicr::Namespace welcome_pub(uint32_t sender) const;
   quicr::Namespace commit_pub(uint32_t sender) const;
+  quicr::Namespace leave_pub(uint32_t sender) const;
 
   // Form specific names
   static uint32_t id_for(const mls::KeyPackage& key_package);
   quicr::Name for_key_package(uint32_t sender, uint32_t key_package_id) const;
   quicr::Name for_welcome(uint32_t sender, uint32_t key_package_id) const;
   quicr::Name for_commit(uint32_t sender, uint64_t epoch) const;
+  quicr::Name for_leave(uint32_t sender) const;
 
   // Parse names
   std::tuple<Operation::Type, uint32_t, uint32_t> parse(quicr::Name name) const;
@@ -104,4 +119,5 @@ private:
   SubNamespace key_package_base;
   SubNamespace welcome_base;
   SubNamespace commit_base;
+  SubNamespace leave_base;
 };

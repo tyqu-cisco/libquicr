@@ -25,14 +25,14 @@ public:
   // Set up MLS state for the creator
   static MLSSession create(const MLSInitInfo& info, uint64_t group_id);
 
-  // Set up MLS state for a joiner
-  static MLSSession join(const MLSInitInfo& info, const bytes& welcome_data);
-  static bool welcome_match(const bytes& welcome_data,
-                            const mls::KeyPackage& key_package);
+  // Join logic
+  static std::optional<MLSSession> join(const MLSInitInfo& info,
+                                        const bytes& welcome_data);
+  std::optional<std::tuple<bytes, bytes>> add(uint32_t user_id, const bytes& key_package_data);
 
-  // Group operations
-  // TODO(RLB): Add a remove() and triggering logic
-  std::tuple<bytes, bytes> add(const bytes& key_package_data);
+  // Leave logic
+  bytes leave();
+  std::optional<bytes> remove(uint32_t user_id, const bytes& remove_data);
 
   // Commit handling
   enum struct HandleResult : uint8_t
@@ -45,10 +45,13 @@ public:
 
   // Access to the underlying MLS state
   const mls::State& get_state() const;
+  size_t member_count() const;
 
 private:
   MLSSession(mls::State&& state);
   bytes fresh_secret() const;
+
+  static bool credential_matches_id(uint32_t user_id, const mls::Credential& cred);
 
   mls::State mls_state;
 };

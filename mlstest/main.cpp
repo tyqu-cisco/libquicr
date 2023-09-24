@@ -4,6 +4,7 @@
 #include "mls_client.h"
 
 #include <thread>
+#include <random>
 using namespace std::chrono_literals;
 
 class MLSTest
@@ -12,6 +13,7 @@ public:
   MLSTest()
     : logger(std::make_shared<cantina::Logger>(true))
   {
+    // Connect to a relay
     const auto* relay_var = getenv("MLS_RELAY");
     const auto* port_var = getenv("MLS_PORT");
 
@@ -22,15 +24,20 @@ public:
       .port = port,
       .proto = quicr::RelayInfo::Protocol::QUIC,
     };
+
+    // Assign a random group ID to avoid conflicts
+    auto dist = std::uniform_int_distribution<uint64_t>(
+        std::numeric_limits<uint64_t>::min(),
+        std::numeric_limits<uint64_t>::max()
+    );
+    auto engine = std::random_device();
+    group_id = dist(engine);
   }
 
 protected:
   const cantina::LoggerPointer logger;
   quicr::RelayInfo relay;
 
-  // The group_id needs to be different for different test cases.  Otherwise the
-  // relay will reject the publish intents from different clients for the same
-  // namespace.
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
 
@@ -55,10 +62,8 @@ protected:
   }
 };
 
-TEST_CASE_FIXTURE(MLSTest, "Set up two-person MLS")
+TEST_CASE_FIXTURE(MLSTest, "Create a two-person group")
 {
-  group_id = 0x32706172747921;
-
   // Initialize and connect two users
   auto creator = MLSClient{ next_config() };
   REQUIRE(creator.connect(true));
@@ -73,12 +78,13 @@ TEST_CASE_FIXTURE(MLSTest, "Set up two-person MLS")
   // Check that both are in the same state
   const auto creator_epoch = creator.next_epoch();
   const auto joiner_epoch = joiner.next_epoch();
+  REQUIRE(creator_epoch.epoch == 1);
+  REQUIRE(creator_epoch.member_count == 2);
   REQUIRE(creator_epoch == joiner_epoch);
 }
 
-TEST_CASE_FIXTURE(MLSTest, "Set up group MLS")
+TEST_CASE_FIXTURE(MLSTest, "Create a large group")
 {
-  group_id = 0x33706172747921;
   const auto group_size = user_names.size();
 
   // Initialize and connect the creator
@@ -101,8 +107,62 @@ TEST_CASE_FIXTURE(MLSTest, "Set up group MLS")
 
     // Verify that all clients are in the same state
     const auto creator_epoch = creator.next_epoch();
+    REQUIRE(creator_epoch.epoch == i);
+    REQUIRE(creator_epoch.member_count == i + 1);
     for (auto& joiner : joiners) {
       REQUIRE(creator_epoch == joiner->next_epoch());
+    }
+  }
+}
+
+TEST_CASE_FIXTURE(MLSTest, "Create a large group then tear down")
+{
+  const auto group_size = user_names.size();
+
+  // Initialize and connect the creator
+  auto creator = MLSClient{ next_config() };
+  creator.connect(true);
+
+  // Add each remaining client
+  // (The shared_ptr is necessary to store an MLSClient in a vector, since
+  // MLSClient itself doesn't meet the requirements for MoveInsertable.)
+  auto expected_epoch = uint64_t(0);
+  auto members = std::vector<std::shared_ptr<MLSClient>>{};
+  for (size_t i = 1; i < group_size; i++) {
+    // Initialize
+    auto joiner = std::make_shared<MLSClient>(next_config());
+    members.push_back(joiner);
+
+    // Join the group
+    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->join());
+    REQUIRE(joiner->joined());
+
+    // Verify that all clients are in the same state
+    expected_epoch += 1;
+    const auto creator_epoch = creator.next_epoch();
+    REQUIRE(creator_epoch.epoch == expected_epoch);
+    REQUIRE(creator_epoch.member_count == members.size() + 1);
+    for (auto& member : members) {
+      REQUIRE(creator_epoch == member->next_epoch());
+    }
+  }
+
+  // All clients but the creator leave
+  while (!members.empty()) {
+    auto leaver = members.back();
+    members.pop_back();
+
+    // Leave the group
+    leaver->leave();
+
+    // Verify that all clients are in the same state
+    expected_epoch += 1;
+    const auto creator_epoch = creator.next_epoch();
+    REQUIRE(creator_epoch.epoch == expected_epoch);
+    REQUIRE(creator_epoch.member_count == members.size() + 1);
+    for (auto& member : members) {
+      REQUIRE(creator_epoch == member->next_epoch());
     }
   }
 }

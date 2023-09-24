@@ -33,10 +33,14 @@ MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
   return { std::move(mls_state) };
 }
 
-MLSSession
+std::optional<MLSSession>
 MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
 {
   const auto welcome = tls::get<mls::Welcome>(welcome_data);
+  if (!welcome.find(info.key_package)) {
+    return std::nullopt;
+  }
+
   auto state = State{ info.init_key,
                       info.encryption_key,
                       info.signature_key,
@@ -44,21 +48,18 @@ MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
                       welcome,
                       std::nullopt,
                       {} };
-  return { std::move(state) };
+  return { { std::move(state) } };
 }
 
-bool
-MLSSession::welcome_match(const bytes& welcome_data,
-                          const KeyPackage& key_package)
-{
-  const auto welcome = tls::get<Welcome>(welcome_data);
-  return welcome.find(key_package).has_value();
-}
-
-std::tuple<bytes, bytes>
-MLSSession::add(const bytes& key_package_data)
+std::optional<std::tuple<bytes, bytes>>
+MLSSession::add(uint32_t user_id, const bytes& key_package_data)
 {
   const auto key_package = tls::get<KeyPackage>(key_package_data);
+  if (!credential_matches_id(user_id, key_package.leaf_node.credential)) {
+    // KeyPackage is not for the identified user
+    return std::nullopt;
+  }
+
   const auto add_proposal = mls_state.add_proposal(key_package);
 
   const auto commit_opts = CommitOpts{ { add_proposal }, true, false, {} };
@@ -72,8 +73,56 @@ MLSSession::add(const bytes& key_package_data)
   // the group.  This property needs to be assured by the application logic in
   // MLSClient.
   mls_state = next_state;
-
   return std::make_tuple(welcome_data, commit_data);
+}
+
+bytes
+MLSSession::leave()
+{
+  const auto remove_proposal = mls_state.remove(mls_state.index(), {});
+  return tls::marshal(remove_proposal);
+}
+
+std::optional<bytes>
+MLSSession::remove(uint32_t user_id, const bytes& remove_data)
+{
+  // Import the message
+  const auto remove_message = tls::get<MLSMessage>(remove_data);
+  const auto remove_auth_content = mls_state.unwrap(remove_message);
+  const auto& remove_content = remove_auth_content.content;
+
+  // Verify that this is a self-remove proposal
+  const auto& remove_proposal = var::get<Proposal>(remove_content.content);
+  const auto& remove = var::get<Remove>(remove_proposal.content);
+  const auto& sender =
+    var::get<MemberSender>(remove_content.sender.sender).sender;
+  if (remove.removed != sender) {
+    // Remove proposal is not self-remove
+    return std::nullopt;
+  }
+
+  // Verify that the self-removed user has the indicated user ID
+  const auto leaf = mls_state.tree().leaf_node(remove.removed).value();
+  if (!credential_matches_id(user_id, leaf.credential)) {
+    // Remove proposal is not for the identified user
+    return std::nullopt;
+  }
+
+  // Re-originate the remove proposal and commit it
+  const auto my_remove_proposal = mls_state.remove_proposal(remove.removed);
+  const auto commit_opts =
+    CommitOpts{ { my_remove_proposal }, true, false, {} };
+  const auto [commit, _welcome, next_state] =
+    mls_state.commit(fresh_secret(), commit_opts, {});
+  mls::silence_unused(_welcome);
+
+  const auto commit_data = tls::marshal(commit);
+
+  // XXX(RLB): This logic assumes that the commit succeeds, and is adopted by
+  // the group.  This property needs to be assured by the application logic in
+  // MLSClient.
+  mls_state = next_state;
+  return commit_data;
 }
 
 MLSSession::HandleResult
@@ -112,6 +161,17 @@ MLSSession::get_state() const
   return mls_state;
 }
 
+size_t
+MLSSession::member_count() const
+{
+  size_t members = 0;
+  mls_state.tree().all_leaves([&](auto /* i */, const auto& /* leaf */) {
+    members += 1;
+    return true;
+  });
+  return members;
+}
+
 MLSSession::MLSSession(mls::State&& state)
   : mls_state(state)
 {
@@ -121,4 +181,12 @@ bytes
 MLSSession::fresh_secret() const
 {
   return random_bytes(mls_state.cipher_suite().secret_size());
+}
+
+bool
+MLSSession::credential_matches_id(uint32_t user_id, const Credential& cred)
+{
+  const auto basic_cred = cred.get<BasicCredential>();
+  const auto expected_identity = tls::marshal(user_id);
+  return basic_cred.identity == expected_identity;
 }
