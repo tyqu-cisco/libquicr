@@ -89,8 +89,8 @@ MLSSession::leave()
   return tls::marshal(remove_proposal);
 }
 
-std::optional<bytes>
-MLSSession::remove(uint32_t user_id, const bytes& remove_data)
+std::optional<LeafIndex>
+MLSSession::validate_leave(uint32_t user_id, const bytes& remove_data)
 {
   // Import the message
   const auto remove_message = tls::get<MLSMessage>(remove_data);
@@ -114,10 +114,16 @@ MLSSession::remove(uint32_t user_id, const bytes& remove_data)
     return std::nullopt;
   }
 
+  return remove.removed;
+}
+
+bytes
+MLSSession::remove(LeafIndex removed)
+{
   // Re-originate the remove proposal and commit it
-  const auto my_remove_proposal = mls_state.remove_proposal(remove.removed);
+  const auto remove_proposal = mls_state.remove_proposal(removed);
   const auto commit_opts =
-    CommitOpts{ { my_remove_proposal }, true, false, {} };
+    CommitOpts{ { remove_proposal }, true, false, {} };
   const auto [commit, _welcome, next_state] =
     mls_state.commit(fresh_secret(), commit_opts, message_opts);
   mls::silence_unused(_welcome);
@@ -130,6 +136,32 @@ MLSSession::remove(uint32_t user_id, const bytes& remove_data)
   mls_state = next_state;
   return commit_data;
 }
+
+bool
+MLSSession::should_commit(size_t /* n_adds */, const std::vector<LeafIndex>& removed) const
+{
+  // TODO(richbarn): This method should be sensitive to what is being committed.
+  // For example, the tree stays maximally full if the neighbor of a removed
+  // node commits the remove.
+
+  // Return true if this client's leaf node is the leftmost non-blank leaf in
+  // the tree, aside from any leaf nodes being removed.  We exploit the fact
+  // that TreeKEMPublicKey::all_leaves traverses the non-blank leaves of the
+  // tree in left-to-right order.
+  bool first_leaf_matches = false;
+  mls_state.tree().all_leaves([&](auto i, const auto& /* unused */) {
+    if (std::find(removed.begin(), removed.end(), i) != removed.end()) {
+      // Removed leaf, continue
+      return true;
+    }
+
+    first_leaf_matches = (i == mls_state.index());
+    return false;
+  });
+
+  return first_leaf_matches;
+}
+
 
 MLSSession::HandleResult
 MLSSession::handle(const bytes& commit_data)

@@ -127,7 +127,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group then tear down")
   // (The shared_ptr is necessary to store an MLSClient in a vector, since
   // MLSClient itself doesn't meet the requirements for MoveInsertable.)
   auto expected_epoch = uint64_t(0);
-  auto members = std::vector<std::shared_ptr<MLSClient>>{};
+  auto members = std::deque<std::shared_ptr<MLSClient>>{};
   for (size_t i = 1; i < group_size; i++) {
     // Initialize
     auto joiner = std::make_shared<MLSClient>(next_config());
@@ -148,21 +148,37 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group then tear down")
     }
   }
 
+  // The creator leaves
+  creator.leave();
+
+  // Validate that all members are in the same state
+  const auto require_same = [](auto expected_epoch, const auto& members) {
+    const auto& reference_member = members.front();
+    const auto reference_epoch = reference_member->next_epoch();
+    REQUIRE(reference_epoch.epoch == expected_epoch);
+    REQUIRE(reference_epoch.member_count == members.size());
+    for (auto& member : members) {
+      if (member == reference_member) {
+        continue;
+      }
+
+      REQUIRE(reference_epoch == member->next_epoch());
+    }
+  };
+
+  expected_epoch += 1;
+  require_same(expected_epoch, members);
+
   // All clients but the creator leave
-  while (!members.empty()) {
-    auto leaver = members.back();
-    members.pop_back();
+  while (members.size() > 1) {
+    auto leaver = members.front();
+    members.pop_front();
 
     // Leave the group
     leaver->leave();
 
     // Verify that all clients are in the same state
     expected_epoch += 1;
-    const auto creator_epoch = creator.next_epoch();
-    REQUIRE(creator_epoch.epoch == expected_epoch);
-    REQUIRE(creator_epoch.member_count == members.size() + 1);
-    for (auto& member : members) {
-      REQUIRE(creator_epoch == member->next_epoch());
-    }
+    require_same(expected_epoch, members);
   }
 }

@@ -32,7 +32,11 @@ public:
 
   // Leave logic
   bytes leave();
-  std::optional<bytes> remove(uint32_t user_id, const bytes& remove_data);
+  std::optional<mls::LeafIndex> validate_leave(uint32_t user_id, const bytes& remove_data);
+  bytes remove(mls::LeafIndex removed);
+
+  // Whether this client should commit in a given situation
+  bool should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const;
 
   // Commit handling
   enum struct HandleResult : uint8_t

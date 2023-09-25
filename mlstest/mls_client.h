@@ -94,7 +94,7 @@ private:
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
   AsyncQueue<Epoch> epochs;
-  bool should_commit() const;
+  bool should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const;
 
   std::unique_ptr<quicr::QuicRClient> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};

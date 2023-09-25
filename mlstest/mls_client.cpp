@@ -115,12 +115,12 @@ MLSClient::next_epoch()
 }
 
 bool
-MLSClient::should_commit() const
+MLSClient::should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const
 {
-  // TODO(RLB): This method should apply some tie-breaker rule to determine who
-  // the committer is.  For example, the left-most member of the tree.
-  // XXX(RLB): The rule here only works for the test cases, not more generally
-  return user_id == 0;
+  // TODO(richbarn): This method should be sensitive to what is being committed.
+  // For example, the tree stays maximally full if the neighbor of a removed
+  // node commits the remove.
+  return session().should_commit(n_adds, removed);
 }
 
 bool
@@ -193,7 +193,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
-      if (!should_commit()) {
+      if (!should_commit(1, {})) {
         logger->Log("Ignoring KeyPackage; not the designated committer");
         return;
       }
@@ -266,20 +266,22 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
-      if (!should_commit()) {
+      auto& session = std::get<MLSSession>(mls_session);
+      auto maybe_removed = session.validate_leave(sender, data);
+      if (!maybe_removed) {
+        logger->Log("Invalid Leave request");
+        return;
+      }
+
+      const auto removed = maybe_removed.value();
+      if (!should_commit(0, { removed })) {
         logger->Log("Ignoring Leave; not the designated committer");
         return;
       }
 
       logger->Log("Removing client from MLS session");
-      auto& session = std::get<MLSSession>(mls_session);
-      auto maybe_commit = session.remove(sender, data);
-      if (!maybe_commit) {
-        logger->Log("Remove failed");
-        return;
-      }
 
-      auto commit = maybe_commit.value();
+      auto commit = session.remove(removed);
 
       logger->Log("Publishing Commit Message");
       const auto epoch = session.get_state().epoch();
