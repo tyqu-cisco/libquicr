@@ -4,8 +4,6 @@
 
 #include <transport/transport.h>
 
-#include <future>
-
 using namespace mls;
 using namespace std::chrono_literals;
 
@@ -17,6 +15,7 @@ MLSClient::MLSClient(const Config& config)
   , user_id(config.user_id)
   , namespaces(NamespaceConfig(group_id))
   , mls_session(MLSInitInfo{ suite, user_id })
+  , inbound_objects(std::make_shared<AsyncQueue<QuicrObject>>())
 {
   // Set up Quicr relay connection
   logger->Log("Connecting to " + config.relay.hostname + ":" +
@@ -25,6 +24,11 @@ MLSClient::MLSClient(const Config& config)
   qtransport::TransportConfig tcfg{ .tls_cert_filename = NULL,
                                     .tls_key_filename = NULL };
   client = std::make_unique<quicr::Client>(config.relay, tcfg, logger);
+}
+
+MLSClient::~MLSClient()
+{
+  disconnect();
 }
 
 bool
@@ -52,14 +56,50 @@ MLSClient::connect(bool as_creator)
   success = success && subscribe(namespaces.welcome_sub());
   success = success && subscribe(namespaces.commit_sub());
   success = success && subscribe(namespaces.leave_sub());
+  success = success && subscribe(namespaces.commit_vote_sub());
 
   // Announce intent to publish on this user's namespaces
   success = success && publish_intent(namespaces.key_package_pub(user_id));
   success = success && publish_intent(namespaces.welcome_pub(user_id));
   success = success && publish_intent(namespaces.commit_pub(user_id));
   success = success && publish_intent(namespaces.leave_pub(user_id));
+  success = success && publish_intent(namespaces.commit_vote_pub(user_id));
 
-  return success;
+  if (!success) {
+    return false;
+  }
+
+  // Start up a thread to handle incoming messages
+  // TODO(richbarn): Have appropriate mutexes on internal state
+  handler_thread = std::thread([&]() {
+    while (!handler_thread_stop) {
+      auto maybe_obj = inbound_objects->pop(inbound_object_timeout);
+      if (!maybe_obj) {
+        continue;
+      }
+
+      auto& obj = maybe_obj.value();
+      handle(obj.name, std::move(obj.data));
+    }
+
+    logger->Log("Handler thread stopping");
+  });
+
+  return true;
+}
+
+void
+MLSClient::disconnect()
+{
+  logger->Log("Disconnecting QuicR client");
+  client->disconnect();
+
+  logger->Log("Stopping handler thread");
+  if (handler_thread && handler_thread.value().joinable()) {
+    handler_thread_stop = true;
+    handler_thread.value().join();
+    logger->Log("Handler thread stopped");
+  }
 }
 
 bool
@@ -83,6 +123,12 @@ MLSClient::leave()
   auto self_remove = std::get<MLSSession>(mls_session).leave();
   const auto name = namespaces.for_leave(user_id);
   publish(name, std::move(self_remove));
+
+  // XXX(richbarn) It is important to disconnect here, before the Commit shows
+  // up removing this client.  If we receive that Commit, we will crash with
+  // "Invalid proposal list" becase we are trying to handle a Commit that
+  // removes us.
+  disconnect();
 }
 
 bool
@@ -100,8 +146,7 @@ MLSClient::session() const
 bool
 operator==(const MLSClient::Epoch& lhs, const MLSClient::Epoch& rhs)
 {
-  return lhs.epoch == rhs.epoch &&
-         lhs.member_count == rhs.member_count &&
+  return lhs.epoch == rhs.epoch && lhs.member_count == rhs.member_count &&
          lhs.epoch_authenticator == rhs.epoch_authenticator;
 }
 
@@ -112,7 +157,8 @@ MLSClient::next_epoch()
 }
 
 bool
-MLSClient::should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const
+MLSClient::should_commit(size_t n_adds,
+                         const std::vector<mls::LeafIndex>& removed) const
 {
   // TODO(richbarn): This method should be sensitive to what is being committed.
   // For example, the tree stays maximally full if the neighbor of a removed
@@ -130,7 +176,7 @@ MLSClient::subscribe(quicr::Namespace ns)
   auto promise = std::promise<bool>();
   auto future = promise.get_future();
   const auto delegate =
-    std::make_shared<SubDelegate>(*this, logger, std::move(promise));
+    std::make_shared<SubDelegate>(logger, inbound_objects, std::move(promise));
 
   logger->Log("Subscribe to " + std::string(ns));
   quicr::bytes empty;
@@ -161,10 +207,10 @@ MLSClient::publish_intent(quicr::Namespace ns)
 
   client->publishIntent(delegate, ns, {}, {}, {});
 
-  // XXX(RLB) `delegate` is destroyed at this point, because quicr::Client doesn't
-  // hold strong references to its delegates.  As a result, though, quicr::Client
-  // fails cleanly when its references are invalidated, and we don't need
-  // anything further from the delegate.  So we can let it go.
+  // XXX(RLB) `delegate` is destroyed at this point, because quicr::Client
+  // doesn't hold strong references to its delegates.  As a result, though,
+  // quicr::Client fails cleanly when its references are invalidated, and we
+  // don't need anything further from the delegate.  So we can let it go.
   return future.get();
 }
 
@@ -176,6 +222,8 @@ MLSClient::publish(const quicr::Name& name, bytes&& data)
   client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
+// TODO(RLB): Split this method into different methods invoked by different
+// types of subscriber delegates.
 void
 MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 {
@@ -210,17 +258,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         namespaces.for_welcome(user_id, third_name_value);
       publish(welcome_name, std::move(welcome));
 
-      logger->Log("Publishing Commit Message");
-      const auto epoch = session.get_state().epoch();
-      const auto commit_name = namespaces.for_commit(user_id, epoch);
-      publish(commit_name, std::move(commit));
-
-      epochs.push({ session.get_state().epoch(),
-                    session.member_count(),
-                    session.get_state().epoch_authenticator() });
-
-      logger->Log("Updated to epoch " +
-                  std::to_string(session.get_state().epoch()));
+      publish_commit(std::move(commit));
       return;
     }
 
@@ -279,18 +317,8 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       logger->Log("Removing client from MLS session");
 
       auto commit = session.remove(removed);
+      publish_commit(std::move(commit));
 
-      logger->Log("Publishing Commit Message");
-      const auto epoch = session.get_state().epoch();
-      const auto commit_name = namespaces.for_commit(user_id, epoch);
-      publish(commit_name, std::move(commit));
-
-      epochs.push({ session.get_state().epoch(),
-                    session.member_count(),
-                    session.get_state().epoch_authenticator() });
-
-      logger->Log("Updated to epoch " +
-                  std::to_string(session.get_state().epoch()));
       return;
     }
 
@@ -302,33 +330,174 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
+      const auto epoch = uint64_t(third_name_value);
       auto& session = std::get<MLSSession>(mls_session);
-      switch (session.handle(data)) {
-        case MLSSession::HandleResult::ok: {
-          epochs.push({ session.get_state().epoch(),
-                        session.member_count(),
-                        session.get_state().epoch_authenticator() });
-          logger->Log("Updated to epoch " +
-                      std::to_string(session.get_state().epoch()));
-          break;
-        }
-
-        case MLSSession::HandleResult::stale: {
-          logger->Log("Ignoring stale commit");
-          break;
-        }
-
-        case MLSSession::HandleResult::future: {
-          logger->Log("Ignoring commit for a future epoch");
-          break;
-        }
+      if (epoch != session.get_state().epoch()) {
+        logger->Log("Ignoring Commit that is not for the current epoch (" +
+                    std::to_string(epoch) +
+                    " != " + std::to_string(session.get_state().epoch()) + ")");
+        return;
       }
 
+      // Record the committer's vote for themselves
+      commit_votes.try_emplace(epoch);
+      commit_votes.at(epoch).try_emplace(sender, 0);
+      commit_votes.at(epoch).at(sender) += 1;
+
+      // Add the commit to the cache
+      commit_cache.try_emplace(epoch);
+      commit_cache.at(epoch).insert_or_assign(sender, data);
+
+      // If this is the first commit for this epoch...
+      if (commit_cache.at(epoch).size() == 1) {
+        // Record our own vote
+        commit_votes.at(epoch).at(sender) += 1;
+
+        // Broadcast it to others
+        logger->Log("Sending CommitVote for epoch=" + std::to_string(epoch) +
+                    " committer=" + std::to_string(sender));
+        auto& session = std::get<MLSSession>(mls_session);
+        auto vote =
+          session.wrap_vote({ MLSSession::VoteType::commit, epoch, sender });
+        const auto vote_name = namespaces.for_commit_vote(user_id, epoch);
+        publish(vote_name, std::move(vote));
+      }
+
+      // Advance if we are able
+      advance_if_quorum();
       return;
     }
 
+    case NamespaceConfig::Operation::commit_vote: {
+      logger->Log("Received CommitVote");
+
+      if (!joined()) {
+        logger->Log("Ignoring CommitVote; not joined to the group");
+        return;
+      }
+
+      auto epoch = uint64_t(third_name_value);
+      auto& session = std::get<MLSSession>(mls_session);
+      if (epoch != session.get_state().epoch()) {
+        logger->Log("Ignoring CommitVote; wrong epoch (" +
+                    std::to_string(epoch) +
+                    " != " + std::to_string(session.get_state().epoch()) + ")");
+        return;
+      }
+
+      auto vote = session.unwrap_vote(data);
+      if (vote.type != MLSSession::VoteType::commit) {
+        logger->Log("Invalid CommitVote; wrong type");
+        return;
+      }
+
+      if (vote.id != epoch) {
+        logger->Log("Invalid CommitVote; wrong ID");
+        return;
+      }
+
+      // Record the vote
+      logger->Log("Recording vote for epoch=" + std::to_string(epoch) +
+                  " committer=" + std::to_string(vote.vote));
+      commit_votes.try_emplace(epoch);
+      commit_votes.at(epoch).try_emplace(vote.vote, 0);
+      commit_votes.at(epoch).at(vote.vote) += 1;
+
+      // Advance if we are able
+      advance_if_quorum();
+      return;
+    }
+
+    // TODO(richbarn): Run a gotKey vote as well as a commit vote
     default:
       throw std::runtime_error("Illegal operation in name: " +
                                std::to_string(op));
+  }
+}
+
+void
+MLSClient::publish_commit(bytes&& commit_data)
+{
+  logger->Log("Voting for our own Commit");
+  auto& session = std::get<MLSSession>(mls_session);
+  const auto epoch = session.get_state().epoch();
+  commit_votes.try_emplace(epoch);
+  commit_votes.at(epoch).try_emplace(user_id, 0);
+  commit_votes.at(epoch).at(user_id) += 1;
+
+  logger->Log("Caching our own Commit");
+  commit_cache.try_emplace(epoch);
+  commit_cache.at(epoch).try_emplace(user_id, commit_data);
+
+  logger->Log("Publishing Commit Message");
+  const auto commit_name = namespaces.for_commit(user_id, epoch);
+  publish(commit_name, std::move(commit_data));
+
+  // This advances in the special case where there is one member in the group
+  // (and thus we need no other votes)
+  advance_if_quorum();
+}
+
+void
+MLSClient::advance_if_quorum()
+{
+  logger->Log("Attempting to advance the MLS state...");
+  auto& session = std::get<MLSSession>(mls_session);
+  const auto epoch = session.get_state().epoch();
+  const auto quorum = (session.member_count() / 2) + 1;
+
+  if (!commit_votes.contains(epoch)) {
+    logger->Log("Failed to advance; no votes for this epoch");
+    return;
+  }
+
+  const auto& votes = commit_votes.at(epoch);
+  const auto committer_it =
+    std::find_if(votes.begin(), votes.end(), [&](const auto& pair) {
+      return pair.second >= quorum;
+    });
+
+  if (committer_it == votes.end()) {
+    // No quorum
+    logger->Log("Failed to advance; No quorum");
+    return;
+  }
+
+  const auto committer = committer_it->first;
+  if (!commit_cache.at(epoch).contains(committer)) {
+    // No commit cached
+    logger->Log("Failed to advance; Commit is not yet available");
+    return;
+  }
+
+  const auto& commit = commit_cache.at(epoch).at(committer);
+  switch (session.handle(commit)) {
+    case MLSSession::HandleResult::ok:
+      epochs.push({ session.get_state().epoch(),
+                    session.member_count(),
+                    session.get_state().epoch_authenticator() });
+      logger->Log("Updated to epoch " +
+                  std::to_string(session.get_state().epoch()));
+      break;
+
+    case MLSSession::HandleResult::fail:
+      logger->Log("Failed to advance; unspecified failure");
+      break;
+
+    case MLSSession::HandleResult::stale:
+      logger->Log("Failed to advance; stale commit");
+      break;
+
+    case MLSSession::HandleResult::future:
+      logger->Log("Failed to advance; future commit");
+      break;
+
+    case MLSSession::HandleResult::removes_me:
+      logger->Log("Failed to advance; MLS commit would remove me");
+      break;
+
+    default:
+      logger->Log("Failed to advance; reason unknown");
+      return;
   }
 }

@@ -1,7 +1,7 @@
 #include "mls_session.h"
 
-#include <numeric>
 #include <iostream>
+#include <numeric>
 
 using namespace mls;
 
@@ -77,10 +77,8 @@ MLSSession::add(uint32_t user_id, const bytes& key_package_data)
   const auto commit_data = tls::marshal(commit);
   const auto welcome_data = tls::marshal(welcome);
 
-  // XXX(RLB): This logic assumes that the commit succeeds, and is adopted by
-  // the group.  This property needs to be assured by the application logic in
-  // MLSClient.
-  mls_state = next_state;
+  cached_commit = commit_data;
+  cached_next_state = std::move(next_state);
   return std::make_tuple(welcome_data, commit_data);
 }
 
@@ -95,7 +93,7 @@ std::optional<LeafIndex>
 MLSSession::validate_leave(uint32_t user_id, const bytes& remove_data)
 {
   // Import the message
-const auto remove_message = tls::get<MLSMessage>(remove_data);
+  const auto remove_message = tls::get<MLSMessage>(remove_data);
   const auto remove_auth_content = mls_state.unwrap(remove_message);
   const auto& remove_content = remove_auth_content.content;
 
@@ -124,18 +122,15 @@ MLSSession::remove(LeafIndex removed)
 {
   // Re-originate the remove proposal and commit it
   const auto remove_proposal = mls_state.remove_proposal(removed);
-  const auto commit_opts =
-    CommitOpts{ { remove_proposal }, true, false, {} };
+  const auto commit_opts = CommitOpts{ { remove_proposal }, true, false, {} };
   const auto [commit, _welcome, next_state] =
     mls_state.commit(fresh_secret(), commit_opts, message_opts);
   mls::silence_unused(_welcome);
 
   const auto commit_data = tls::marshal(commit);
 
-  // XXX(RLB): This logic assumes that the commit succeeds, and is adopted by
-  // the group.  This property needs to be assured by the application logic in
-  // MLSClient.
-  mls_state = next_state;
+  cached_commit = commit_data;
+  cached_next_state = std::move(next_state);
   return commit_data;
 }
 
@@ -174,7 +169,8 @@ total_distance(LeafIndex a, const std::vector<LeafIndex>& b)
 // it return the raw distance metric.  This would support a "jump ball" commit
 // strategy, where the closest nodes in the tree commit fastest.
 bool
-MLSSession::should_commit(size_t n_adds, const std::vector<LeafIndex>& removed) const
+MLSSession::should_commit(size_t n_adds,
+                          const std::vector<LeafIndex>& removed) const
 {
   // A node should commit if:
   //
@@ -211,11 +207,33 @@ MLSSession::should_commit(size_t n_adds, const std::vector<LeafIndex>& removed) 
   return mls_state.index() == min_index;
 }
 
+bytes
+MLSSession::wrap_vote(const Vote& vote)
+{
+  const auto vote_data = tls::marshal(vote);
+  const auto message = mls_state.protect({}, vote_data, 0);
+  return tls::marshal(message);
+}
+
+MLSSession::Vote
+MLSSession::unwrap_vote(const bytes& vote_data)
+{
+  const auto message = tls::get<MLSMessage>(vote_data);
+  const auto [_aad, pt] = mls_state.unprotect(message);
+  return tls::get<Vote>(pt);
+}
 
 MLSSession::HandleResult
 MLSSession::handle(const bytes& commit_data)
 {
-  const auto commit = tls::get<MLSMessage>(commit_data);
+  if (commit_data == cached_commit) {
+    mls_state = std::move(cached_next_state.value());
+    cached_commit.reset();
+    cached_next_state.reset();
+    return HandleResult::ok;
+  }
+
+  const auto commit_message = tls::get<MLSMessage>(commit_data);
 
   // Extract the epoch from the Commit message
   const auto get_epoch = mls::overloaded{
@@ -225,7 +243,7 @@ MLSSession::handle(const bytes& commit_data)
       throw std::runtime_error("Illegal message type");
     }
   };
-  const auto commit_epoch = var::visit(get_epoch, commit.message);
+  const auto commit_epoch = var::visit(get_epoch, commit_message.message);
 
   // Validate the epoch, and handle the Commit if it is timely
   const auto current_epoch = mls_state.epoch();
@@ -238,7 +256,22 @@ MLSSession::handle(const bytes& commit_data)
     return HandleResult::future;
   }
 
-  mls_state = tls::opt::get(mls_state.handle(commit));
+  // Attempt to handle the Commit
+  // XXX(richbarn): It would be nice to unwrap the Commit here and explicitly
+  // check whether there is a Remove proposal removing this client.  However,
+  // this causes a double-decrypt, which fails because decrypting causes keys to
+  // be erased.  Instead we assume that any failure due to an invalid proposal
+  // list is this type of failure
+  try {
+    mls_state = tls::opt::get(mls_state.handle(commit_message));
+  } catch (const ProtocolError& exc) {
+    if (std::string(exc.what()) == "Invalid proposal list") {
+      return HandleResult::removes_me;
+    }
+
+    return HandleResult::fail;
+  }
+
   return HandleResult::ok;
 }
 

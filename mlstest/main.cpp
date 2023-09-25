@@ -3,8 +3,8 @@
 
 #include "mls_client.h"
 
-#include <thread>
 #include <random>
+#include <thread>
 using namespace std::chrono_literals;
 
 class MLSTest
@@ -27,9 +27,8 @@ public:
 
     // Assign a random group ID to avoid conflicts
     auto dist = std::uniform_int_distribution<uint64_t>(
-        std::numeric_limits<uint64_t>::min(),
-        std::numeric_limits<uint64_t>::max()
-    );
+      std::numeric_limits<uint64_t>::min(),
+      std::numeric_limits<uint64_t>::max());
     auto engine = std::random_device();
     group_id = dist(engine);
   }

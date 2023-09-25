@@ -14,20 +14,6 @@ TODO
 * [X] Generalize the committer selection rule so that it's not just index==0
 * [ ] Add coalescing for MLS proposals (?)
 * [ ] Add a reordering queue for MLS commits
-* [ ] Add a stub "epoch server"
 * [ ] Refactor MLSSession::add/remove into one multi-Commit method
 * [ ] Commit on join to populate the tree
-
-
-
-Distributed consensus on Commits:
-* Send Commit whenever you feel like it
-* On receiving Commit:
-    * Add commit to cache
-    * If first for epoch N: Send Vote = PrivateMessage(EpochAuthenticator)
-* On receiving Vote:
-    * Add Vote to tally for corresponding Commit
-    * If tally > quorum accept Commit, reset state
-
-
 

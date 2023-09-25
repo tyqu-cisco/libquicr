@@ -12,7 +12,7 @@ CLANG_FORMAT=clang-format -i
 
 .PHONY: all dev dev3 test ctest dtest dbtest libs test-libs test-all everything ci ci3 clean cclean format
 
-${BIN}: ${BUILD_DIR} *.cpp
+${BIN}: ${BUILD_DIR} *.h *.cpp
 	cmake --build ${BUILD_DIR}
 
 ${BUILD_DIR}: CMakeLists.txt

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "async_queue.h"
 #include "mls_session.h"
 #include "namespace_config.h"
 #include "sub_delegate.h"
@@ -12,33 +13,7 @@
 #include <future>
 #include <map>
 #include <memory>
-#include <queue>
 #include <thread>
-
-template<typename T>
-struct AsyncQueue
-{
-  void push(const T& val)
-  {
-    std::unique_lock<std::mutex> lock(mutex);
-    queue.push(val);
-    lock.unlock();
-    nonempty.notify_all();
-  }
-
-  T pop()
-  {
-    std::unique_lock<std::mutex> lock(mutex);
-    nonempty.wait(lock, [&] { return !queue.empty(); });
-    const auto val = queue.front();
-    queue.pop();
-    return val;
-  }
-
-  std::mutex mutex;
-  std::condition_variable nonempty;
-  std::queue<T> queue;
-};
 
 class MLSClient
 {
@@ -52,9 +27,11 @@ public:
   };
 
   explicit MLSClient(const Config& config);
+  ~MLSClient();
 
   // Connect to the server and make subscriptions
   bool connect(bool as_creator);
+  void disconnect();
 
   // MLS operations
   bool join();
@@ -93,16 +70,30 @@ private:
 
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
+
+  std::map<uint64_t, std::map<uint32_t, size_t>> commit_votes;
+  std::map<uint64_t, std::map<uint32_t, bytes>> commit_cache;
   AsyncQueue<Epoch> epochs;
-  bool should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const;
+
+  bool should_commit(size_t n_adds,
+                     const std::vector<mls::LeafIndex>& removed) const;
 
   std::unique_ptr<quicr::Client> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 
+  std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
+  std::optional<std::thread> handler_thread;
+  std::atomic_bool handler_thread_stop = false;
+
   bool subscribe(quicr::Namespace nspace);
   bool publish_intent(quicr::Namespace nspace);
   void publish(const quicr::Name& name, bytes&& data);
+  void enqueue(QuicrObject&& obj);
   void handle(const quicr::Name& name, quicr::bytes&& data);
+  void publish_commit(bytes&& commit_data);
+  void advance_if_quorum();
+
+  static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
 
   friend class SubDelegate;
 };

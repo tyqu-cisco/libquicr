@@ -2,11 +2,11 @@
 #include "mls_client.h"
 #include <sstream>
 
-SubDelegate::SubDelegate(MLSClient& mls_client_in,
-                         cantina::LoggerPointer logger_in,
+SubDelegate::SubDelegate(cantina::LoggerPointer logger_in,
+                         std::shared_ptr<AsyncQueue<QuicrObject>> queue_in,
                          std::promise<bool> on_response_in)
   : logger(std::move(logger_in))
-  , mls_client(mls_client_in)
+  , queue(std::move(queue_in))
   , on_response(std::move(on_response_in))
 {
 }
@@ -58,7 +58,7 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
   }
 
   logger->Log(log_msg.str());
-  mls_client.handle(quicr_name, std::move(data));
+  queue->push({ quicr_name, std::move(data) });
 }
 
 void

@@ -171,6 +171,11 @@ public:
     std::list<Subscriptions::Remote> list =
       subscribeList.find(datagram.header.name);
 
+    logger->info << "onPublisherObject: Name " << datagram.header.name
+                 << " size: " << datagram.media_data.size()
+                 << " #recv: " << list.size()
+                 << std::flush;
+
     for (auto dest : list) {
 
       if (dest.context_id == context_id) {
