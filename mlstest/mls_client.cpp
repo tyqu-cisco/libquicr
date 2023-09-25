@@ -24,10 +24,7 @@ MLSClient::MLSClient(const Config& config)
 
   qtransport::TransportConfig tcfg{ .tls_cert_filename = NULL,
                                     .tls_key_filename = NULL };
-  // XXX(RLB): The first argument to this ctor should be const&.  Once that is
-  // fixed, we can remove this copy.
-  auto relay_copy = config.relay;
-  client = std::make_unique<quicr::QuicRClient>(relay_copy, tcfg, logger);
+  client = std::make_unique<quicr::Client>(config.relay, tcfg, logger);
 }
 
 bool
@@ -164,8 +161,8 @@ MLSClient::publish_intent(quicr::Namespace ns)
 
   client->publishIntent(delegate, ns, {}, {}, {});
 
-  // XXX(RLB) `delegate` is destroyed at this point, because QuicRClient doesn't
-  // hold strong references to its delegates.  As a result, though, QuicRClient
+  // XXX(RLB) `delegate` is destroyed at this point, because quicr::Client doesn't
+  // hold strong references to its delegates.  As a result, though, quicr::Client
   // fails cleanly when its references are invalidated, and we don't need
   // anything further from the delegate.  So we can let it go.
   return future.get();

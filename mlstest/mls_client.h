@@ -96,7 +96,7 @@ private:
   AsyncQueue<Epoch> epochs;
   bool should_commit(size_t n_adds, const std::vector<mls::LeafIndex>& removed) const;
 
-  std::unique_ptr<quicr::QuicRClient> client;
+  std::unique_ptr<quicr::Client> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 
   bool subscribe(quicr::Namespace nspace);
