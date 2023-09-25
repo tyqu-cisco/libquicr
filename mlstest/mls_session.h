@@ -54,4 +54,6 @@ private:
   static bool credential_matches_id(uint32_t user_id, const mls::Credential& cred);
 
   mls::State mls_state;
+
+  static const mls::MessageOpts message_opts;
 };

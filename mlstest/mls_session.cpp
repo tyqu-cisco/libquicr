@@ -24,6 +24,12 @@ MLSInitInfo::MLSInitInfo(CipherSuite suite_in, uint32_t user_id_in)
   };
 }
 
+const MessageOpts MLSSession::message_opts = {
+  .encrypt = true,
+  .authenticated_data = {},
+  .padding_size = 0,
+};
+
 MLSSession
 MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
 {
@@ -64,7 +70,7 @@ MLSSession::add(uint32_t user_id, const bytes& key_package_data)
 
   const auto commit_opts = CommitOpts{ { add_proposal }, true, false, {} };
   const auto [commit, welcome, next_state] =
-    mls_state.commit(fresh_secret(), commit_opts, {});
+    mls_state.commit(fresh_secret(), commit_opts, message_opts);
 
   const auto commit_data = tls::marshal(commit);
   const auto welcome_data = tls::marshal(welcome);
@@ -113,7 +119,7 @@ MLSSession::remove(uint32_t user_id, const bytes& remove_data)
   const auto commit_opts =
     CommitOpts{ { my_remove_proposal }, true, false, {} };
   const auto [commit, _welcome, next_state] =
-    mls_state.commit(fresh_secret(), commit_opts, {});
+    mls_state.commit(fresh_secret(), commit_opts, message_opts);
   mls::silence_unused(_welcome);
 
   const auto commit_data = tls::marshal(commit);
