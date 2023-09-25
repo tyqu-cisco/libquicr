@@ -1,4 +1,6 @@
 #include "mls_session.h"
+
+#include <numeric>
 #include <iostream>
 
 using namespace mls;
@@ -93,7 +95,7 @@ std::optional<LeafIndex>
 MLSSession::validate_leave(uint32_t user_id, const bytes& remove_data)
 {
   // Import the message
-  const auto remove_message = tls::get<MLSMessage>(remove_data);
+const auto remove_message = tls::get<MLSMessage>(remove_data);
   const auto remove_auth_content = mls_state.unwrap(remove_message);
   const auto& remove_content = remove_auth_content.content;
 
@@ -137,29 +139,76 @@ MLSSession::remove(LeafIndex removed)
   return commit_data;
 }
 
-bool
-MLSSession::should_commit(size_t /* n_adds */, const std::vector<LeafIndex>& removed) const
+static std::vector<LeafIndex>
+add_locations(size_t n_adds, const TreeKEMPublicKey& tree)
 {
-  // TODO(richbarn): This method should be sensitive to what is being committed.
-  // For example, the tree stays maximally full if the neighbor of a removed
-  // node commits the remove.
+  auto to_place = n_adds;
+  auto places = std::vector<LeafIndex>{};
+  for (auto i = LeafIndex{ 0 }; to_place > 0; i.val++) {
+    if (i < tree.size && !tree.node_at(i).blank()) {
+      continue;
+    }
 
-  // Return true if this client's leaf node is the leftmost non-blank leaf in
-  // the tree, aside from any leaf nodes being removed.  We exploit the fact
-  // that TreeKEMPublicKey::all_leaves traverses the non-blank leaves of the
-  // tree in left-to-right order.
-  bool first_leaf_matches = false;
+    places.push_back(i);
+    to_place -= 1;
+  }
+
+  return places;
+}
+
+static uint32_t
+topological_distance(LeafIndex a, LeafIndex b)
+{
+  return a.ancestor(b).level();
+}
+
+static uint32_t
+total_distance(LeafIndex a, const std::vector<LeafIndex>& b)
+{
+  return std::accumulate(b.begin(), b.end(), 0, [&](auto last, auto bx) {
+    return last + topological_distance(a, bx);
+  });
+}
+
+// XXX(RLB) This method currently returns a boolean, but we might want to have
+// it return the raw distance metric.  This would support a "jump ball" commit
+// strategy, where the closest nodes in the tree commit fastest.
+bool
+MLSSession::should_commit(size_t n_adds, const std::vector<LeafIndex>& removed) const
+{
+  // A node should commit if:
+  //
+  // * It has the lowest total topological distance to the changes among all
+  //   non-blank leaf nodes.
+  // * No node to its left has the same topological distance.
+  //
+  // We compute this in one pass through the leaves of the tree by computing the
+  // total topological distance at each leaf node and updating only if the
+  // distance is lowest than the lowest known.
+
+  auto affected = add_locations(n_adds, mls_state.tree());
+  affected.insert(affected.end(), removed.begin(), removed.end());
+
+  auto min_index = std::optional<LeafIndex>{};
+  auto min_dist = std::optional<uint32_t>{};
   mls_state.tree().all_leaves([&](auto i, const auto& /* unused */) {
     if (std::find(removed.begin(), removed.end(), i) != removed.end()) {
-      // Removed leaf, continue
+      // A removed leaf can't commit
       return true;
     }
 
-    first_leaf_matches = (i == mls_state.index());
-    return false;
+    const auto dist = total_distance(i, affected);
+    if (min_dist && dist >= min_dist) {
+      // If this node is non-minimal, keep looking
+      return true;
+    }
+
+    min_index = i;
+    min_dist = dist;
+    return true;
   });
 
-  return first_leaf_matches;
+  return mls_state.index() == min_index;
 }
 
 
