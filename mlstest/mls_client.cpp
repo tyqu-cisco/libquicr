@@ -270,6 +270,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
+      // Join the group
       const auto& init_info = std::get<MLSInitInfo>(mls_session);
       const auto maybe_mls_session = MLSSession::join(init_info, data);
       if (!maybe_mls_session) {
@@ -282,13 +283,17 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         join_promise->set_value(true);
       }
 
-      const auto& session = std::get<MLSSession>(mls_session);
+      auto& session = std::get<MLSSession>(mls_session);
       epochs.push({ session.get_state().epoch(),
                     session.member_count(),
                     session.get_state().epoch_authenticator() });
 
       const auto welcome_ns = namespaces.welcome_sub();
       client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
+
+      // Send an empty commit to populate my path in the tree
+      auto commit = session.pcs_commit();
+      publish_commit(std::move(commit));
 
       return;
     }

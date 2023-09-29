@@ -134,6 +134,21 @@ MLSSession::remove(LeafIndex removed)
   return commit_data;
 }
 
+bytes
+MLSSession::pcs_commit()
+{
+  const auto commit_opts = CommitOpts{ { }, true, false, {} };
+  const auto [commit, _welcome, next_state] =
+    mls_state.commit(fresh_secret(), commit_opts, message_opts);
+  mls::silence_unused(_welcome);
+
+  const auto commit_data = tls::marshal(commit);
+
+  cached_commit = commit_data;
+  cached_next_state = std::move(next_state);
+  return commit_data;
+}
+
 static std::vector<LeafIndex>
 add_locations(size_t n_adds, const TreeKEMPublicKey& tree)
 {

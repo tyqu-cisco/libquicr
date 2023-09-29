@@ -37,6 +37,9 @@ public:
                                                const bytes& remove_data);
   bytes remove(mls::LeafIndex removed);
 
+  // PCS-only Commits
+  bytes pcs_commit();
+
   // Whether this client should commit in a given situation
   bool should_commit(size_t n_adds,
                      const std::vector<mls::LeafIndex>& removed) const;
