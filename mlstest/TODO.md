@@ -12,8 +12,6 @@ TODO
 * [X] Provide some facility for leaving / being removed
 * [X] Encrypt MLS messages
 * [X] Generalize the committer selection rule so that it's not just index==0
-* [ ] Add coalescing for MLS proposals (?)
-* [ ] Add a reordering queue for MLS commits
-* [ ] Refactor MLSSession::add/remove into one multi-Commit method
-* [ ] Commit on join to populate the tree
+* [X] Commit on join to populate the tree
+* [ ] Refactor message handling to be reordering-tolerant
 
