@@ -42,10 +42,12 @@ public:
   static std::optional<MLSSession> join(const MLSInitInfo& info,
                                         const bytes& welcome_data);
   static ParsedJoinRequest parse_join(const bytes& join_data);
+  bool obsolete(const ParsedJoinRequest& req) const;
 
   // Leave logic
   bytes leave();
   std::optional<ParsedLeaveRequest> parse_leave(const bytes& leave_data);
+  bool obsolete(const ParsedLeaveRequest& req) const;
 
   // Form a commit
   std::tuple<bytes, bytes> commit(

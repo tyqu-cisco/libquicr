@@ -68,6 +68,12 @@ MLSSession::parse_join(const bytes& join_data)
   return { user_id, key_package };
 }
 
+bool
+MLSSession::obsolete(const ParsedJoinRequest& req) const
+{
+  return !!get_state().tree().find(req.key_package.leaf_node);
+}
+
 bytes
 MLSSession::leave()
 {
@@ -106,6 +112,12 @@ MLSSession::parse_leave(const bytes& leave_data)
   const auto user_id = user_id_from_cred(leaf.credential);
 
   return { { user_id, epoch, std::move(leaf) } };
+}
+
+bool
+MLSSession::obsolete(const ParsedLeaveRequest& req) const
+{
+  return !get_state().tree().find(req.removed_leaf_node);
 }
 
 std::tuple<bytes, bytes>

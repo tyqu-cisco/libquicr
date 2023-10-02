@@ -6,7 +6,7 @@
 template<typename T>
 struct AsyncQueue
 {
-  bool empty() const
+  bool empty()
   {
     std::unique_lock<std::mutex> lock(mutex);
     return queue.empty();
@@ -51,6 +51,7 @@ struct AsyncQueue
     return out;
   }
 
+private:
   std::mutex mutex;
   std::condition_variable nonempty;
   std::deque<T> queue;

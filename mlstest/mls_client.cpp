@@ -91,6 +91,7 @@ MLSClient::connect(bool as_creator)
   commit_thread = std::thread([&]() {
     while (!stop_threads) {
       std::this_thread::sleep_for(commit_interval);
+
       const auto _ = lock();
       make_commit();
     }
@@ -120,9 +121,10 @@ MLSClient::disconnect()
   }
 }
 
-bool
+std::future<bool>
 MLSClient::join()
 {
+  const auto _ = lock();
   const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
   const auto kp_id = NamespaceConfig::id_for(kp);
   const auto name = namespaces.for_key_package(user_id, kp_id);
@@ -132,7 +134,7 @@ MLSClient::join()
 
   publish(name, tls::marshal(kp));
 
-  return join_future.get();
+  return join_future;
 }
 
 void
@@ -172,6 +174,16 @@ MLSClient::Epoch
 MLSClient::next_epoch()
 {
   return epochs.pop();
+}
+
+MLSClient::Epoch
+MLSClient::latest_epoch()
+{
+  auto epoch = epochs.pop();
+  while (!epochs.empty()) {
+    epoch = epochs.pop();
+  }
+  return epoch;
 }
 
 bool
@@ -271,7 +283,7 @@ MLSClient::handle(QuicrObject&& obj)
   // Handle objects according to type
   switch (op) {
     case NamespaceConfig::Operation::key_package: {
-      logger->Log("Received Join");
+      logger->Log("Received Join, sender=" + std::to_string(sender));
       auto parsed = MLSSession::parse_join(obj.data);
       if (parsed.user_id != sender) {
         logger->Log("Invalid join request; user ID mismatch");
@@ -289,7 +301,7 @@ MLSClient::handle(QuicrObject&& obj)
     }
 
     case NamespaceConfig::Operation::leave: {
-      logger->Log("Received Leave");
+      logger->Log("Received Leave, sender=" + std::to_string(sender));
 
       if (!joined()) {
         logger->Log("Ignoring leave request; not joined to the group");
@@ -444,15 +456,22 @@ MLSClient::handle(QuicrObject&& obj)
 void
 MLSClient::make_commit()
 {
+  // Can't commit if we're not joined
   if (!joined()) {
     return;
   }
 
   auto& session = std::get<MLSSession>(mls_session);
 
-  // Import the requests
-  const auto self_update = old_leaf_node_to_commit.has_value();
+  // Don't create more than one commit per epoch
+  if (pending_commit) {
+    return;
+  }
 
+  // Import the requests
+  groom_request_queues();
+
+  const auto self_update = old_leaf_node_to_commit.has_value();
   const auto& joins = joins_to_commit;
   const auto& leaves = leaves_to_commit;
 
@@ -484,13 +503,11 @@ MLSClient::make_commit()
                << leaves.size() << std::flush;
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
-  if (!welcome_names.empty()) {
-    pending_welcome = PendingWelcome{
-      .commit = commit,
-      .welcome = welcome,
-      .welcome_names = welcome_names,
-    };
-  }
+  pending_commit = PendingCommit{
+    .commit = commit,
+    .welcome = welcome,
+    .welcome_names = welcome_names,
+  };
 
   // Publish the commit
   const auto epoch = session.get_state().epoch();
@@ -578,34 +595,18 @@ MLSClient::advance_if_quorum()
 
   // If this was a commit we created and there is a corresponding Welcome,
   // release the Welcome to the new joiners
-  if (pending_welcome && pending_welcome.value().commit == commit) {
-    const auto& pw = pending_welcome.value();
-    for (const auto& name : pw.welcome_names) {
-      auto welcome = pw.welcome;
+  if (pending_commit && pending_commit.value().commit == commit) {
+    const auto& pc = pending_commit.value();
+    for (const auto& name : pc.welcome_names) {
+      auto welcome = pc.welcome;
       publish(name, std::move(welcome));
     }
-
-    pending_welcome.reset();
   }
+
+  pending_commit.reset();
 
   // Groom the request queues, removing any requests that are obsolete
-  std::erase_if(joins_to_commit, [session](const auto& join) {
-    // A join is obsolete if the joiner is already in the tree
-    return session.get_state().tree().find(join.key_package.leaf_node);
-  });
-
-  std::erase_if(leaves_to_commit, [session](const auto& leave) {
-    // A leave is obsolete if the leaf node in question is no longer in the tree
-    return !session.get_state().tree().find(leave.removed_leaf_node);
-  });
-
-  if (old_leaf_node_to_commit) {
-    // A self-update request is obsolete if the old leaf node no longer appears
-    const auto& leaf = old_leaf_node_to_commit.value();
-    if (!session.get_state().tree().find(leaf)) {
-      old_leaf_node_to_commit.reset();
-    }
-  }
+  groom_request_queues();
 
   // Handle any out-of-order messages that have been enqueued
   for (auto& obj : future_epoch_objects) {
@@ -618,4 +619,21 @@ MLSClient::advance_if_quorum()
 
   std::erase_if(future_epoch_objects,
                 [&](const auto& obj) { return session.current(obj.data); });
+}
+
+void
+MLSClient::groom_request_queues()
+{
+  const auto& session = std::get<MLSSession>(mls_session);
+  const auto obsolete = [session](const auto& req) { return session.obsolete(req); };
+  std::erase_if(joins_to_commit, obsolete);
+  std::erase_if(leaves_to_commit, obsolete);
+
+  if (old_leaf_node_to_commit) {
+    // A self-update request is obsolete if the old leaf node no longer appears
+    const auto& leaf = old_leaf_node_to_commit.value();
+    if (!session.get_state().tree().find(leaf)) {
+      old_leaf_node_to_commit.reset();
+    }
+  }
 }

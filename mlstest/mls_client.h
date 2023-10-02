@@ -34,7 +34,7 @@ public:
   void disconnect();
 
   // MLS operations
-  bool join();
+  std::future<bool> join();
   void leave();
 
   // Access internal state
@@ -52,6 +52,7 @@ public:
     friend bool operator==(const Epoch& lhs, const Epoch& rhs);
   };
   Epoch next_epoch();
+  Epoch latest_epoch();
 
 private:
   // Logging
@@ -94,7 +95,7 @@ private:
   std::atomic_bool stop_threads = false;
 
   // Handler thread, including out-of-order message handling
-  struct PendingWelcome
+  struct PendingCommit
   {
     bytes commit;
     bytes welcome;
@@ -104,11 +105,12 @@ private:
   static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
   std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
   std::vector<QuicrObject> future_epoch_objects;
-  std::optional<PendingWelcome> pending_welcome;
+  std::optional<PendingCommit> pending_commit;
   std::optional<std::thread> handler_thread;
 
   void handle(QuicrObject&& obj);
   void advance_if_quorum();
+  void groom_request_queues();
 
   // Commit thread
   static constexpr auto commit_interval = std::chrono::milliseconds(250);
