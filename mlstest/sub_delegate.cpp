@@ -15,11 +15,8 @@ void
 SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                                  const quicr::SubscribeResult& result)
 {
-  std::stringstream log_msg;
-  log_msg << "onSubscriptionResponse: ns: " << quicr_namespace
-          << " status: " << static_cast<int>(result.status);
-
-  logger->Log(log_msg.str());
+  logger->info << "onSubscriptionResponse: ns: " << quicr_namespace
+          << " status: " << static_cast<int>(result.status) << std::flush;
 
   if (on_response) {
     on_response->set_value(result.status ==
@@ -34,11 +31,8 @@ SubDelegate::onSubscriptionEnded(
   const quicr::SubscribeResult::SubscribeStatus& reason)
 
 {
-  std::stringstream log_msg;
-  log_msg << "onSubscriptionEnded: ns: " << quicr_namespace
-          << " reason: " << static_cast<int>(reason);
-
-  logger->Log(log_msg.str());
+  logger->info << "onSubscriptionEnded: ns: " << quicr_namespace
+          << " reason: " << static_cast<int>(reason) << std::flush;
 }
 
 void
@@ -48,16 +42,15 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
                                 bool /* use_reliable_transport */,
                                 quicr::bytes&& data)
 {
-  std::stringstream log_msg;
-  log_msg << "recv object: name: " << quicr_name << " data sz: " << data.size();
+  logger->info << "recv object: name: " << quicr_name << " data sz: " << data.size();
 
   if (!data.empty()) {
-    log_msg << " data: " << data.data();
+    logger->info << " data: " << data.data();
   } else {
-    log_msg << " (no data)";
+    logger->info << " (no data)";
   }
 
-  logger->Log(log_msg.str());
+  logger->info << std::flush;
   queue->push({ quicr_name, std::move(data) });
 }
 
@@ -66,23 +59,9 @@ SubDelegate::onSubscribedObjectFragment(const quicr::Name& quicr_name,
                                         uint8_t /* priority */,
                                         uint16_t /* expiry_age_ms */,
                                         bool /* use_reliable_transport */,
-                                        const uint64_t& offset,
-                                        bool is_last_fragment,
-                                        quicr::bytes&& data)
+                                        const uint64_t& /* offset */,
+                                        bool /* is_last_fragment */,
+                                        quicr::bytes&& /* data */)
 {
-  std::stringstream log_msg;
-  log_msg << "recv object: name: " << quicr_name << " fragment no: " << offset
-          << (is_last_fragment ? "(final)" : "(non-final)")
-          << " data sz: " << data.size();
-
-  if (!data.empty()) {
-    log_msg << " data: " << data.data();
-  } else {
-    log_msg << " (no data)";
-  }
-
-  logger->Log(log_msg.str());
-
-  // TODO(RLB): Handle fragmented objects.
-  // XXX(RLB): Why doean't libquicr handle reassembly??
+  logger->info << "Ignoring object fragment received for " << quicr_name << std::flush;
 }
