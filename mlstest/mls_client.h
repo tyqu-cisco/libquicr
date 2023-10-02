@@ -123,4 +123,7 @@ private:
   };
 
   std::optional<PendingWelcome> pending_welcome;
+
+  // Deferral of messages from future epochs
+  std::vector<QuicrObject> future_epoch_objects;
 };

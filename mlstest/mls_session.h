@@ -53,6 +53,10 @@ public:
     const std::vector<ParsedJoinRequest>& joins,
     const std::vector<ParsedLeaveRequest>& leaves);
 
+  // Whether a given MLSMessage is for the current epoch
+  bool current(const bytes& message) const;
+  bool future(const bytes& message) const;
+
   // Whether this client should commit in a given situation
   bool should_commit(size_t n_adds,
                      const std::vector<ParsedLeaveRequest>& leaves) const;

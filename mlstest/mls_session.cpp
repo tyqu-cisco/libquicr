@@ -142,6 +142,20 @@ MLSSession::commit(bool force_path,
   return std::make_tuple(commit_data, welcome_data);
 }
 
+bool
+MLSSession::current(const bytes& message_data) const
+{
+  const auto epoch = tls::get<MLSMessage>(message_data).epoch();
+  return epoch == mls_state.epoch();
+}
+
+bool
+MLSSession::future(const bytes& message_data) const
+{
+  const auto epoch = tls::get<MLSMessage>(message_data).epoch();
+  return epoch > mls_state.epoch();
+}
+
 static std::vector<LeafIndex>
 add_locations(size_t n_adds, const TreeKEMPublicKey& tree)
 {
@@ -173,9 +187,9 @@ total_distance(LeafIndex a, const std::vector<LeafIndex>& b)
   });
 }
 
-// XXX(RLB) This method currently returns a boolean, but we might want to have
-// it return the raw distance metric.  This would support a "jump ball" commit
-// strategy, where the closest nodes in the tree commit fastest.
+// XXX(richbarn) This method currently returns a boolean, but we might want to
+// have it return the raw distance metric.  This would support a "jump ball"
+// commit strategy, where the closest nodes in the tree commit fastest.
 bool
 MLSSession::should_commit(size_t n_adds,
                           const std::vector<ParsedLeaveRequest>& leaves) const
@@ -249,27 +263,10 @@ MLSSession::handle(const bytes& commit_data)
     return HandleResult::ok;
   }
 
+  // The caller should assure that any handled commits are timely
   const auto commit_message = tls::get<MLSMessage>(commit_data);
-
-  // Extract the epoch from the Commit message
-  const auto get_epoch = mls::overloaded{
-    [](const PublicMessage& msg) -> epoch_t { return msg.get_epoch(); },
-    [](const PrivateMessage& msg) -> epoch_t { return msg.get_epoch(); },
-    [](const auto& /* other */) -> epoch_t {
-      throw std::runtime_error("Illegal message type");
-    }
-  };
-  const auto commit_epoch = var::visit(get_epoch, commit_message.message);
-
-  // Validate the epoch, and handle the Commit if it is timely
-  const auto current_epoch = mls_state.epoch();
-  if (current_epoch > commit_epoch) {
-    return HandleResult::stale;
-  }
-
-  if (current_epoch < commit_epoch) {
-    // TODO(RLB): It would be nice to handle this with a reordering queue.
-    return HandleResult::future;
+  if (commit_message.epoch() != mls_state.epoch()) {
+    return HandleResult::fail;
   }
 
   // Attempt to handle the Commit

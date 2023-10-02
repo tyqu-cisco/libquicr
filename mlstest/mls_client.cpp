@@ -45,7 +45,7 @@ MLSClient::connect(bool as_creator)
     mls_session = MLSSession::create(init_info, group_id);
   }
 
-  // XXX(RLB) These subscriptions / publishes are done serially; we await a
+  // XXX(richbarn) These subscriptions / publishes are done serially; we await a
   // response for each one before doing the next.  They could be done in
   // parallel by having subscribe/publish_intent return std::future<bool> and
   // awaiting all of these futures together.
@@ -224,11 +224,6 @@ MLSClient::publish_intent(quicr::Namespace ns)
     std::make_shared<PubDelegate>(logger, std::move(promise));
 
   client->publishIntent(delegate, ns, {}, {}, {});
-
-  // XXX(RLB) `delegate` is destroyed at this point, because quicr::Client
-  // doesn't hold strong references to its delegates.  As a result, though,
-  // quicr::Client fails cleanly when its references are invalidated, and we
-  // don't need anything further from the delegate.  So we can let it go.
   return future.get();
 }
 
@@ -240,13 +235,41 @@ MLSClient::publish(const quicr::Name& name, bytes&& data)
   client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
-// TODO(RLB): Split this method into different methods invoked by different
-// types of subscriber delegates.
 void
 MLSClient::handle(QuicrObject&& obj)
 {
   const auto [op, sender, third_name_value] = namespaces.parse(obj.name);
 
+  // Any MLSMesssage-formatted messages that are for a future epoch get
+  // enqueued for later processing.
+  switch (op) {
+    case NamespaceConfig::Operation::leave:
+      [[fallthrough]];
+    case NamespaceConfig::Operation::commit:
+      [[fallthrough]];
+    case NamespaceConfig::Operation::commit_vote: {
+      const auto* session = std::get_if<MLSSession>(&mls_session);
+      if (!session || session->future(obj.data)) {
+        future_epoch_objects.push_back(std::move(obj));
+        return;
+      }
+
+      break;
+    }
+
+    case NamespaceConfig::Operation::key_package:
+      [[fallthrough]];
+    case NamespaceConfig::Operation::welcome: {
+      break;
+    }
+
+
+    default:
+      throw std::runtime_error("Illegal operation in name: " +
+                               std::to_string(op));
+  }
+
+  // Handle objects according to type
   switch (op) {
     case NamespaceConfig::Operation::key_package: {
       logger->Log("Received Join");
@@ -269,9 +292,6 @@ MLSClient::handle(QuicrObject&& obj)
     case NamespaceConfig::Operation::leave: {
       logger->Log("Received Leave");
 
-      // TODO(richbarn): We should queue leave requests that we are unable to
-      // process yet, whether because we are not joined, or because they're for
-      // a future epoch.
       if (!joined()) {
         logger->Log("Ignoring leave request; not joined to the group");
         return;
@@ -579,23 +599,33 @@ MLSClient::advance_if_quorum()
   }
 
   // Groom the request queues, removing any requests that are obsolete
-
-  // A join is obsolete if the joiner is already in the tree
   std::erase_if(joins_to_commit, [session](const auto& join) {
+    // A join is obsolete if the joiner is already in the tree
     return session.get_state().tree().find(join.key_package.leaf_node);
   });
 
-  // A leave is obsolete if the leaf node in question is no longer in the tree
   std::erase_if(leaves_to_commit, [session](const auto& leave) {
+    // A leave is obsolete if the leaf node in question is no longer in the tree
     return !session.get_state().tree().find(leave.removed_leaf_node);
   });
 
-  // A self-update request is obsolete if the old leaf node no longer appears
   if (old_leaf_node_to_commit) {
+    // A self-update request is obsolete if the old leaf node no longer appears
     const auto& leaf = old_leaf_node_to_commit.value();
     if (!session.get_state().tree().find(leaf)) {
-      // leaf has already been updated
       old_leaf_node_to_commit.reset();
     }
   }
+
+  // Handle any out-of-order messages that have been enqueued
+  for (auto& obj : future_epoch_objects) {
+    if (!session.current(obj.data)) {
+      continue;
+    }
+
+    handle(std::move(obj));
+  }
+
+  std::erase_if(future_epoch_objects,
+                [&](const auto& obj) { return session.current(obj.data); });
 }

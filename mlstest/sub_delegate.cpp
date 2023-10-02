@@ -16,7 +16,7 @@ SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                                  const quicr::SubscribeResult& result)
 {
   logger->info << "onSubscriptionResponse: ns: " << quicr_namespace
-          << " status: " << static_cast<int>(result.status) << std::flush;
+               << " status: " << static_cast<int>(result.status) << std::flush;
 
   if (on_response) {
     on_response->set_value(result.status ==
@@ -32,7 +32,7 @@ SubDelegate::onSubscriptionEnded(
 
 {
   logger->info << "onSubscriptionEnded: ns: " << quicr_namespace
-          << " reason: " << static_cast<int>(reason) << std::flush;
+               << " reason: " << static_cast<int>(reason) << std::flush;
 }
 
 void
@@ -42,7 +42,8 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
                                 bool /* use_reliable_transport */,
                                 quicr::bytes&& data)
 {
-  logger->info << "recv object: name: " << quicr_name << " data sz: " << data.size();
+  logger->info << "recv object: name: " << quicr_name
+               << " data sz: " << data.size();
 
   if (!data.empty()) {
     logger->info << " data: " << data.data();
@@ -63,5 +64,6 @@ SubDelegate::onSubscribedObjectFragment(const quicr::Name& quicr_name,
                                         bool /* is_last_fragment */,
                                         quicr::bytes&& /* data */)
 {
-  logger->info << "Ignoring object fragment received for " << quicr_name << std::flush;
+  logger->info << "Ignoring object fragment received for " << quicr_name
+               << std::flush;
 }
