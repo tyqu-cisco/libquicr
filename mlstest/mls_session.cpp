@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <numeric>
+#include <set>
 
 using namespace mls;
 
@@ -59,27 +60,12 @@ MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
   return { { std::move(state) } };
 }
 
-std::optional<std::tuple<bytes, bytes>>
-MLSSession::add(uint32_t user_id, const bytes& key_package_data)
+ParsedJoinRequest
+MLSSession::parse_join(const bytes& join_data)
 {
-  const auto key_package = tls::get<KeyPackage>(key_package_data);
-  if (!credential_matches_id(user_id, key_package.leaf_node.credential)) {
-    // KeyPackage is not for the identified user
-    return std::nullopt;
-  }
-
-  const auto add_proposal = mls_state.add_proposal(key_package);
-
-  const auto commit_opts = CommitOpts{ { add_proposal }, true, false, {} };
-  const auto [commit, welcome, next_state] =
-    mls_state.commit(fresh_secret(), commit_opts, message_opts);
-
-  const auto commit_data = tls::marshal(commit);
-  const auto welcome_data = tls::marshal(welcome);
-
-  cached_commit = commit_data;
-  cached_next_state = std::move(next_state);
-  return std::make_tuple(welcome_data, commit_data);
+  const auto key_package = tls::get<KeyPackage>(join_data);
+  const auto user_id = user_id_from_cred(key_package.leaf_node.credential);
+  return { user_id, key_package };
 }
 
 bytes
@@ -89,64 +75,68 @@ MLSSession::leave()
   return tls::marshal(remove_proposal);
 }
 
-std::optional<LeafIndex>
-MLSSession::validate_leave(uint32_t user_id, const bytes& remove_data)
+std::optional<ParsedLeaveRequest>
+MLSSession::parse_leave(const bytes& leave_data)
 {
   // Import the message
-  const auto remove_message = tls::get<MLSMessage>(remove_data);
-  const auto remove_auth_content = mls_state.unwrap(remove_message);
-  const auto& remove_content = remove_auth_content.content;
+  const auto leave_message = tls::get<MLSMessage>(leave_data);
+  if (leave_message.group_id() != mls_state.group_id()) {
+    return std::nullopt;
+  }
+
+  const auto epoch = leave_message.epoch();
+  if (epoch != mls_state.epoch()) {
+    return std::nullopt;
+  }
+
+  const auto leave_auth_content = mls_state.unwrap(leave_message);
+  const auto& leave_content = leave_auth_content.content;
+  const auto& leave_sender = leave_content.sender.sender;
 
   // Verify that this is a self-remove proposal
-  const auto& remove_proposal = var::get<Proposal>(remove_content.content);
+  const auto& remove_proposal = var::get<Proposal>(leave_content.content);
   const auto& remove = var::get<Remove>(remove_proposal.content);
-  const auto& sender =
-    var::get<MemberSender>(remove_content.sender.sender).sender;
+  const auto& sender = var::get<MemberSender>(leave_sender).sender;
   if (remove.removed != sender) {
-    // Remove proposal is not self-remove
     return std::nullopt;
   }
 
   // Verify that the self-removed user has the indicated user ID
   const auto leaf = mls_state.tree().leaf_node(remove.removed).value();
-  if (!credential_matches_id(user_id, leaf.credential)) {
-    // Remove proposal is not for the identified user
-    return std::nullopt;
-  }
+  const auto user_id = user_id_from_cred(leaf.credential);
 
-  return remove.removed;
+  return { { user_id, epoch, remove.removed } };
 }
 
-bytes
-MLSSession::remove(LeafIndex removed)
+std::tuple<bytes, bytes>
+MLSSession::commit(bool force_path,
+                   const std::vector<ParsedJoinRequest>& joins,
+                   const std::vector<ParsedLeaveRequest>& leaves)
 {
-  // Re-originate the remove proposal and commit it
-  const auto remove_proposal = mls_state.remove_proposal(removed);
-  const auto commit_opts = CommitOpts{ { remove_proposal }, true, false, {} };
-  const auto [commit, _welcome, next_state] =
+  auto proposals = std::vector<Proposal>{};
+
+  std::transform(
+    joins.begin(),
+    joins.end(),
+    std::back_inserter(proposals),
+    [&](const auto& req) { return mls_state.add_proposal(req.key_package); });
+
+  std::transform(
+    leaves.begin(),
+    leaves.end(),
+    std::back_inserter(proposals),
+    [&](const auto& req) { return mls_state.remove_proposal(req.removed); });
+
+  const auto commit_opts = CommitOpts{ proposals, true, force_path, {} };
+  const auto [commit, welcome, next_state] =
     mls_state.commit(fresh_secret(), commit_opts, message_opts);
-  mls::silence_unused(_welcome);
 
   const auto commit_data = tls::marshal(commit);
+  const auto welcome_data = tls::marshal(welcome);
 
   cached_commit = commit_data;
   cached_next_state = std::move(next_state);
-  return commit_data;
-}
-
-bytes
-MLSSession::pcs_commit()
-{
-  const auto commit_opts = CommitOpts{ { }, true, false, {} };
-  const auto [commit, _welcome, next_state] =
-    mls_state.commit(fresh_secret(), commit_opts, message_opts);
-  mls::silence_unused(_welcome);
-
-  const auto commit_data = tls::marshal(commit);
-
-  cached_commit = commit_data;
-  cached_next_state = std::move(next_state);
-  return commit_data;
+  return std::make_tuple(commit_data, welcome_data);
 }
 
 static std::vector<LeafIndex>
@@ -185,7 +175,7 @@ total_distance(LeafIndex a, const std::vector<LeafIndex>& b)
 // strategy, where the closest nodes in the tree commit fastest.
 bool
 MLSSession::should_commit(size_t n_adds,
-                          const std::vector<LeafIndex>& removed) const
+                          const std::vector<ParsedLeaveRequest>& leaves) const
 {
   // A node should commit if:
   //
@@ -197,13 +187,19 @@ MLSSession::should_commit(size_t n_adds,
   // total topological distance at each leaf node and updating only if the
   // distance is lowest than the lowest known.
 
+  auto removed = std::set<mls::LeafIndex>{};
+  std::transform(leaves.begin(),
+                 leaves.end(),
+                 std::inserter(removed, removed.begin()),
+                 [](const auto& req) { return req.removed; });
+
   auto affected = add_locations(n_adds, mls_state.tree());
   affected.insert(affected.end(), removed.begin(), removed.end());
 
   auto min_index = std::optional<LeafIndex>{};
   auto min_dist = std::optional<uint32_t>{};
   mls_state.tree().all_leaves([&](auto i, const auto& /* unused */) {
-    if (std::find(removed.begin(), removed.end(), i) != removed.end()) {
+    if (removed.contains(i)) {
       // A removed leaf can't commit
       return true;
     }
@@ -318,10 +314,9 @@ MLSSession::fresh_secret() const
   return random_bytes(mls_state.cipher_suite().secret_size());
 }
 
-bool
-MLSSession::credential_matches_id(uint32_t user_id, const Credential& cred)
+uint32_t
+MLSSession::user_id_from_cred(const Credential& cred)
 {
-  const auto basic_cred = cred.get<BasicCredential>();
-  const auto expected_identity = tls::marshal(user_id);
-  return basic_cred.identity == expected_identity;
+  const auto& basic_cred = cred.get<BasicCredential>();
+  return tls::get<uint32_t>(basic_cred.identity);
 }

@@ -1,12 +1,13 @@
 #pragma once
 
 #include <condition_variable>
-#include <queue>
+#include <deque>
 
 template<typename T>
 struct AsyncQueue
 {
-  bool empty() const {
+  bool empty() const
+  {
     std::unique_lock<std::mutex> lock(mutex);
     return queue.empty();
   }
@@ -14,7 +15,7 @@ struct AsyncQueue
   void push(const T& val)
   {
     std::unique_lock<std::mutex> lock(mutex);
-    queue.push(val);
+    queue.push_back(val);
     lock.unlock();
     nonempty.notify_all();
   }
@@ -24,7 +25,7 @@ struct AsyncQueue
     std::unique_lock<std::mutex> lock(mutex);
     nonempty.wait(lock, [&] { return !queue.empty(); });
     const auto val = queue.front();
-    queue.pop();
+    queue.pop_front();
     return val;
   }
 
@@ -38,11 +39,19 @@ struct AsyncQueue
     }
 
     const auto val = queue.front();
-    queue.pop();
+    queue.pop_front();
     return val;
+  }
+
+  std::deque<T> take()
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    auto out = std::move(queue);
+    queue = {};
+    return out;
   }
 
   std::mutex mutex;
   std::condition_variable nonempty;
-  std::queue<T> queue;
+  std::deque<T> queue;
 };

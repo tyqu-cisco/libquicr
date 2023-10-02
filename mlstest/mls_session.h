@@ -19,6 +19,19 @@ struct MLSInitInfo
   MLSInitInfo(mls::CipherSuite suite, uint32_t user_id);
 };
 
+struct ParsedJoinRequest
+{
+  uint32_t user_id;
+  mls::KeyPackage key_package;
+};
+
+struct ParsedLeaveRequest
+{
+  uint32_t user_id;
+  mls::epoch_t epoch;
+  mls::LeafIndex removed;
+};
+
 class MLSSession
 {
 public:
@@ -28,21 +41,21 @@ public:
   // Join logic
   static std::optional<MLSSession> join(const MLSInitInfo& info,
                                         const bytes& welcome_data);
-  std::optional<std::tuple<bytes, bytes>> add(uint32_t user_id,
-                                              const bytes& key_package_data);
+  static ParsedJoinRequest parse_join(const bytes& join_data);
 
   // Leave logic
   bytes leave();
-  std::optional<mls::LeafIndex> validate_leave(uint32_t user_id,
-                                               const bytes& remove_data);
-  bytes remove(mls::LeafIndex removed);
+  std::optional<ParsedLeaveRequest> parse_leave(const bytes& leave_data);
 
-  // PCS-only Commits
-  bytes pcs_commit();
+  // Form a commit
+  std::tuple<bytes, bytes> commit(
+    bool force_path,
+    const std::vector<ParsedJoinRequest>& joins,
+    const std::vector<ParsedLeaveRequest>& leaves);
 
   // Whether this client should commit in a given situation
   bool should_commit(size_t n_adds,
-                     const std::vector<mls::LeafIndex>& removed) const;
+                     const std::vector<ParsedLeaveRequest>& leaves) const;
 
   // Vote handling
   enum struct VoteType : uint8_t
@@ -79,8 +92,7 @@ private:
   MLSSession(mls::State&& state);
   bytes fresh_secret() const;
 
-  static bool credential_matches_id(uint32_t user_id,
-                                    const mls::Credential& cred);
+  static uint32_t user_id_from_cred(const mls::Credential& cred);
 
   mls::State mls_state;
   std::optional<bytes> cached_commit;

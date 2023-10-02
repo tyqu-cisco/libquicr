@@ -76,29 +76,44 @@ private:
   AsyncQueue<Epoch> epochs;
 
   bool should_commit(size_t n_adds,
-                     const std::vector<mls::LeafIndex>& removed) const;
+                     const std::vector<ParsedLeaveRequest>& removed) const;
 
   std::unique_ptr<quicr::Client> client;
   std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 
   std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
   std::optional<std::thread> handler_thread;
-  std::atomic_bool handler_thread_stop = false;
+  std::atomic_bool stop_threads = false;
 
   bool subscribe(quicr::Namespace nspace);
   bool publish_intent(quicr::Namespace nspace);
   void publish(const quicr::Name& name, bytes&& data);
   void enqueue(QuicrObject&& obj);
-  void handle(const quicr::Name& name, quicr::bytes&& data);
+  void handle(QuicrObject&& obj);
   void publish_commit(bytes&& commit_data);
   void advance_if_quorum();
 
   static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
 
-  friend class SubDelegate;
-
   //////////
 
+  // One lock for the whole object
+  std::recursive_mutex self_mutex;
+  std::unique_lock<std::recursive_mutex> lock() {
+    return std::unique_lock{ self_mutex };
+  }
+
+  // Commit thread
+  std::vector<ParsedJoinRequest> joins_to_commit;
+  std::vector<ParsedLeaveRequest> leaves_to_commit;
+  std::optional<mls::LeafNode> old_leaf_node_to_commit;
+
+  static constexpr auto commit_interval = std::chrono::milliseconds(200);
+
+  std::optional<std::thread> commit_thread;
+  void make_commit();
+
+  // Welcome deferral
   struct PendingWelcome
   {
     bytes commit;

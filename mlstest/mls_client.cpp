@@ -53,7 +53,9 @@ MLSClient::connect(bool as_creator)
   // Subscribe to the required namespaces
   auto success = true;
   success = success && subscribe(namespaces.key_package_sub());
-  success = success && subscribe(namespaces.welcome_sub());
+  if (!as_creator) {
+    success = success && subscribe(namespaces.welcome_sub());
+  }
   success = success && subscribe(namespaces.commit_sub());
   success = success && subscribe(namespaces.leave_sub());
   success = success && subscribe(namespaces.commit_vote_sub());
@@ -69,20 +71,31 @@ MLSClient::connect(bool as_creator)
     return false;
   }
 
-  // Start up a thread to handle incoming messages
   // TODO(richbarn): Have appropriate mutexes on internal state
+
+  // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
-    while (!handler_thread_stop) {
+    while (!stop_threads) {
       auto maybe_obj = inbound_objects->pop(inbound_object_timeout);
       if (!maybe_obj) {
         continue;
       }
 
+      const auto _ = lock();
       auto& obj = maybe_obj.value();
-      handle(obj.name, std::move(obj.data));
+      handle(std::move(obj));
     }
 
     logger->Log("Handler thread stopping");
+  });
+
+  // Start up a thread to commit requests from other clients
+  commit_thread = std::thread([&]() {
+    while (!stop_threads) {
+      std::this_thread::sleep_for(commit_interval);
+      const auto _ = lock();
+      make_commit();
+    }
   });
 
   return true;
@@ -94,11 +107,18 @@ MLSClient::disconnect()
   logger->Log("Disconnecting QuicR client");
   client->disconnect();
 
-  logger->Log("Stopping handler thread");
+  stop_threads = true;
+
   if (handler_thread && handler_thread.value().joinable()) {
-    handler_thread_stop = true;
+    logger->Log("Stopping handler thread");
     handler_thread.value().join();
     logger->Log("Handler thread stopped");
+  }
+
+  logger->Log("Stopping commit thread");
+  if (commit_thread && commit_thread.value().joinable()) {
+    commit_thread.value().join();
+    logger->Log("Commit thread stopped");
   }
 }
 
@@ -158,12 +178,12 @@ MLSClient::next_epoch()
 
 bool
 MLSClient::should_commit(size_t n_adds,
-                         const std::vector<mls::LeafIndex>& removed) const
+                         const std::vector<ParsedLeaveRequest>& leaves) const
 {
   // TODO(richbarn): This method should be sensitive to what is being committed.
   // For example, the tree stays maximally full if the neighbor of a removed
   // node commits the remove.
-  return session().should_commit(n_adds, removed);
+  return session().should_commit(n_adds, leaves);
 }
 
 bool
@@ -225,42 +245,53 @@ MLSClient::publish(const quicr::Name& name, bytes&& data)
 // TODO(RLB): Split this method into different methods invoked by different
 // types of subscriber delegates.
 void
-MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
+MLSClient::handle(QuicrObject&& obj)
 {
-  const auto [op, sender, third_name_value] = namespaces.parse(name);
+  const auto [op, sender, third_name_value] = namespaces.parse(obj.name);
 
   switch (op) {
     case NamespaceConfig::Operation::key_package: {
-      logger->Log("Received KeyPackage");
+      logger->Log("Received Join");
+      auto parsed = MLSSession::parse_join(obj.data);
+      if (parsed.user_id != sender) {
+        logger->Log("Invalid join request; user ID mismatch");
+        return;
+      }
 
+      const auto kp_id = NamespaceConfig::id_for(parsed.key_package);
+      if (kp_id != third_name_value) {
+        logger->Log("Invalid join request; key package mismatch");
+        return;
+      }
+
+      joins_to_commit.push_back(std::move(parsed));
+      return;
+    }
+
+    case NamespaceConfig::Operation::leave: {
+      logger->Log("Received Leave");
+
+      // TODO(richbarn): We should queue leave requests that we are unable to
+      // process yet, whether because we are not joined, or because they're for
+      // a future epoch.
       if (!joined()) {
-        logger->Log("Ignoring KeyPackage; not joined to the group");
+        logger->Log("Ignoring leave request; not joined to the group");
         return;
       }
 
-      if (!should_commit(1, {})) {
-        logger->Log("Ignoring KeyPackage; not the designated committer");
-        return;
-      }
-
-      logger->Log("Adding new client to MLS session");
       auto& session = std::get<MLSSession>(mls_session);
-      auto maybe_welcome_commit = session.add(sender, data);
-      if (!maybe_welcome_commit) {
-        logger->Log("Add failed");
+      auto maybe_parsed = session.parse_leave(obj.data);
+      if (!maybe_parsed) {
+        logger->Log("Ignoring leave request; unable to process");
         return;
       }
 
-      auto [welcome, commit] = maybe_welcome_commit.value();
+      auto& parsed = maybe_parsed.value();
+      if (parsed.user_id != sender) {
+        logger->Log("Ignoring leave request; user ID mismatch");
+      }
 
-      logger->Log("Storing pending Welcome message");
-      pending_welcome = PendingWelcome {
-        .commit = commit,
-        .welcome = welcome,
-        .welcome_names = { namespaces.for_welcome(user_id, third_name_value) },
-      };
-
-      publish_commit(std::move(commit));
+      leaves_to_commit.push_back(std::move(parsed));
       return;
     }
 
@@ -274,7 +305,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 
       // Join the group
       const auto& init_info = std::get<MLSInitInfo>(mls_session);
-      const auto maybe_mls_session = MLSSession::join(init_info, data);
+      const auto maybe_mls_session = MLSSession::join(init_info, obj.data);
       if (!maybe_mls_session) {
         logger->Log("Ignoring Welcome; not for me");
         return;
@@ -293,38 +324,9 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       const auto welcome_ns = namespaces.welcome_sub();
       client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
 
-      // Send an empty commit to populate my path in the tree
-      auto commit = session.pcs_commit();
-      publish_commit(std::move(commit));
-
-      return;
-    }
-
-    case NamespaceConfig::Operation::leave: {
-      logger->Log("Received Leave");
-
-      if (!joined()) {
-        logger->Log("Ignoring Leave; not joined to the group");
-        return;
-      }
-
-      auto& session = std::get<MLSSession>(mls_session);
-      auto maybe_removed = session.validate_leave(sender, data);
-      if (!maybe_removed) {
-        logger->Log("Invalid Leave request");
-        return;
-      }
-
-      const auto removed = maybe_removed.value();
-      if (!should_commit(0, { removed })) {
-        logger->Log("Ignoring Leave; not the designated committer");
-        return;
-      }
-
-      logger->Log("Removing client from MLS session");
-
-      auto commit = session.remove(removed);
-      publish_commit(std::move(commit));
+      // Request an empty commit to populate my path in the tree
+      const auto index = session.get_state().index();
+      old_leaf_node_to_commit = session.get_state().tree().leaf_node(index).value();
 
       return;
     }
@@ -353,7 +355,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 
       // Add the commit to the cache
       commit_cache.try_emplace(epoch);
-      commit_cache.at(epoch).insert_or_assign(sender, data);
+      commit_cache.at(epoch).insert_or_assign(sender, obj.data);
 
       // If this is the first commit for this epoch...
       if (commit_cache.at(epoch).size() == 1) {
@@ -392,7 +394,7 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
         return;
       }
 
-      auto vote = session.unwrap_vote(data);
+      auto vote = session.unwrap_vote(obj.data);
       if (vote.type != MLSSession::VoteType::commit) {
         logger->Log("Invalid CommitVote; wrong type");
         return;
@@ -415,11 +417,67 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
       return;
     }
 
-    // TODO(richbarn): Run a gotKey vote as well as a commit vote
     default:
       throw std::runtime_error("Illegal operation in name: " +
                                std::to_string(op));
   }
+}
+
+void
+MLSClient::make_commit()
+{
+  if (!joined()) {
+    return;
+  }
+
+  auto& session = std::get<MLSSession>(mls_session);
+
+  // Import the requests
+  const auto self_update = old_leaf_node_to_commit.has_value();
+
+  const auto& joins = joins_to_commit;
+  const auto& leaves = leaves_to_commit;
+
+  // Compute the set of names to send a welcome to (if any)
+  auto welcome_names = std::vector<quicr::Name>{};
+  std::transform(joins.begin(),
+                 joins.end(),
+                 std::back_inserter(welcome_names),
+                 [&](const auto& join) {
+                   const auto kp_id = NamespaceConfig::id_for(join.key_package);
+                   return namespaces.for_welcome(user_id, kp_id);
+                 });
+
+  // Abort if nothing to commit
+  if (!self_update && joins.empty() && leaves.empty()) {
+    logger->Log("Not committing; nothing to commit");
+    return;
+  }
+
+  // XXX(richbarn): In this ad-hoc batched mode, this is no longer reliable.
+  // Replace with a time-based solution.
+  if (!self_update && !should_commit(joins.size(), leaves)) {
+    logger->Log("Not committing; not the designated committer");
+    return;
+  }
+
+  logger->info << "Committing Join=#" << joins.size()
+               << " SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=";
+  for (const auto& leave : leaves) {
+    logger->info << leave.removed.val << ",";
+  }
+  logger->info << std::flush;
+  auto [commit, welcome] = session.commit(self_update, joins, leaves);
+
+  if (!welcome_names.empty()) {
+    pending_welcome = PendingWelcome{
+      .commit = commit,
+      .welcome = welcome,
+      .welcome_names = welcome_names,
+    };
+  }
+
+  publish_commit(std::move(commit));
 }
 
 void
@@ -451,7 +509,11 @@ MLSClient::advance_if_quorum()
   logger->Log("Attempting to advance the MLS state...");
   auto& session = std::get<MLSSession>(mls_session);
   const auto epoch = session.get_state().epoch();
-  const auto quorum = (session.member_count() / 2) + 1;
+
+  // XXX(richbarn) This is wrong, it should be (n/2)+1.  It has been reduced by
+  // one so that we don't hang in the case where the last member is being
+  // removed from a two-member group.
+  const auto quorum = (session.member_count() / 2);
 
   if (!commit_votes.contains(epoch)) {
     logger->Log("Failed to advance; no votes for this epoch");
@@ -508,6 +570,8 @@ MLSClient::advance_if_quorum()
       return;
   }
 
+  // If this was a commit we created and there is a corresponding Welcome,
+  // release the Welcome to the new joiners
   if (pending_welcome && pending_welcome.value().commit == commit) {
     const auto& pw = pending_welcome.value();
     for (const auto& name : pw.welcome_names) {
@@ -516,5 +580,30 @@ MLSClient::advance_if_quorum()
     }
 
     pending_welcome.reset();
+  }
+
+  // Groom the request queues, removing any requests that are obsolete
+
+  // Joins are obsolete if the joiner is already in the tree
+  std::erase_if(joins_to_commit, [session](const auto& join) {
+    return session.get_state().tree().find(join.key_package.leaf_node);
+  });
+
+  // Leaves are always obsolete, because they are specific to an epoch
+  // XXX(richbarn): This request leavers to be persistent, to make sure their
+  // leave is reflected in a Commit.  Otherwise, members that have left will
+  // hang around in the tree.  The trouble is that the LeafIndex references can
+  // get invalidated.  We should probably fix this by noting which user /
+  // LeafNode is at the removed leaf in the real epoch, and checking that the
+  // correct leaf is being removed.
+  leaves_to_commit.clear();
+
+  // A self-update request is obsolete if the old leaf node no longer appears
+  if (old_leaf_node_to_commit) {
+    const auto& leaf = old_leaf_node_to_commit.value();
+    if (!session.get_state().tree().find(leaf)) {
+      // leaf has already been updated
+      old_leaf_node_to_commit.reset();
+    }
   }
 }

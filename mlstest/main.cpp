@@ -118,7 +118,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group")
     // Verify that all clients processed the join
     {
       const auto creator_epoch = creator.next_epoch();
-      REQUIRE(creator_epoch.epoch == 2*i - 1);
+      REQUIRE(creator_epoch.epoch == 2 * i - 1);
       REQUIRE(creator_epoch.member_count == i + 1);
       for (auto& joiner : joiners) {
         REQUIRE(creator_epoch == joiner->next_epoch());
@@ -128,7 +128,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group")
     // Verify that all clients processed the joiner's commit
     {
       const auto creator_epoch = creator.next_epoch();
-      REQUIRE(creator_epoch.epoch == 2*i);
+      REQUIRE(creator_epoch.epoch == 2 * i);
       REQUIRE(creator_epoch.member_count == i + 1);
       for (auto& joiner : joiners) {
         REQUIRE(creator_epoch == joiner->next_epoch());
