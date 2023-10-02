@@ -253,10 +253,12 @@ MLSClient::handle(const quicr::Name& name, quicr::bytes&& data)
 
       auto [welcome, commit] = maybe_welcome_commit.value();
 
-      logger->Log("Publishing Welcome Message ");
-      const auto welcome_name =
-        namespaces.for_welcome(user_id, third_name_value);
-      publish(welcome_name, std::move(welcome));
+      logger->Log("Storing pending Welcome message");
+      pending_welcome = PendingWelcome {
+        .commit = commit,
+        .welcome = welcome,
+        .welcome_names = { namespaces.for_welcome(user_id, third_name_value) },
+      };
 
       publish_commit(std::move(commit));
       return;
@@ -504,5 +506,15 @@ MLSClient::advance_if_quorum()
     default:
       logger->Log("Failed to advance; reason unknown");
       return;
+  }
+
+  if (pending_welcome && pending_welcome.value().commit == commit) {
+    const auto& pw = pending_welcome.value();
+    for (const auto& name : pw.welcome_names) {
+      auto welcome = pw.welcome;
+      publish(name, std::move(welcome));
+    }
+
+    pending_welcome.reset();
   }
 }

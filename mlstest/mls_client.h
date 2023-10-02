@@ -96,4 +96,15 @@ private:
   static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
 
   friend class SubDelegate;
+
+  //////////
+
+  struct PendingWelcome
+  {
+    bytes commit;
+    bytes welcome;
+    std::vector<quicr::Name> welcome_names;
+  };
+
+  std::optional<PendingWelcome> pending_welcome;
 };
