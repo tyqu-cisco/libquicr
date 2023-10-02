@@ -54,18 +54,24 @@ public:
   Epoch next_epoch();
 
 private:
-  mls::CipherSuite suite{ mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256 };
-
+  // Logging
   cantina::LoggerPointer logger;
 
+  // Pub/Sub operations
   uint64_t group_id;
   uint32_t user_id;
   NamespaceConfig namespaces;
 
-  struct PendingJoin
-  {
-    MLSInitInfo init_info;
-    std::promise<bool> joined;
+  std::unique_ptr<quicr::Client> client;
+  std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
+
+  bool subscribe(quicr::Namespace nspace);
+  bool publish_intent(quicr::Namespace nspace);
+  void publish(const quicr::Name& name, bytes&& data);
+
+  // MLS operations
+  const mls::CipherSuite suite{
+    mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256
   };
 
   std::optional<std::promise<bool>> join_promise;
@@ -78,43 +84,16 @@ private:
   bool should_commit(size_t n_adds,
                      const std::vector<ParsedLeaveRequest>& removed) const;
 
-  std::unique_ptr<quicr::Client> client;
-  std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
-
-  std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
-  std::optional<std::thread> handler_thread;
-  std::atomic_bool stop_threads = false;
-
-  bool subscribe(quicr::Namespace nspace);
-  bool publish_intent(quicr::Namespace nspace);
-  void publish(const quicr::Name& name, bytes&& data);
-  void enqueue(QuicrObject&& obj);
-  void handle(QuicrObject&& obj);
-  void publish_commit(bytes&& commit_data);
-  void advance_if_quorum();
-
-  static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
-
-  //////////
-
-  // One lock for the whole object
+  // One lock for the whole object; one stop signal for all threads
   std::recursive_mutex self_mutex;
   std::unique_lock<std::recursive_mutex> lock()
   {
     return std::unique_lock{ self_mutex };
   }
 
-  // Commit thread
-  std::vector<ParsedJoinRequest> joins_to_commit;
-  std::vector<ParsedLeaveRequest> leaves_to_commit;
-  std::optional<mls::LeafNode> old_leaf_node_to_commit;
+  std::atomic_bool stop_threads = false;
 
-  static constexpr auto commit_interval = std::chrono::milliseconds(200);
-
-  std::optional<std::thread> commit_thread;
-  void make_commit();
-
-  // Welcome deferral
+  // Handler thread, including out-of-order message handling
   struct PendingWelcome
   {
     bytes commit;
@@ -122,8 +101,21 @@ private:
     std::vector<quicr::Name> welcome_names;
   };
 
-  std::optional<PendingWelcome> pending_welcome;
-
-  // Deferral of messages from future epochs
+  static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
+  std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
   std::vector<QuicrObject> future_epoch_objects;
+  std::optional<PendingWelcome> pending_welcome;
+  std::optional<std::thread> handler_thread;
+
+  void handle(QuicrObject&& obj);
+  void advance_if_quorum();
+
+  // Commit thread
+  static constexpr auto commit_interval = std::chrono::milliseconds(250);
+  std::vector<ParsedJoinRequest> joins_to_commit;
+  std::vector<ParsedLeaveRequest> leaves_to_commit;
+  std::optional<mls::LeafNode> old_leaf_node_to_commit;
+
+  std::optional<std::thread> commit_thread;
+  void make_commit();
 };

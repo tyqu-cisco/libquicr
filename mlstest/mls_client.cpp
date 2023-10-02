@@ -263,7 +263,6 @@ MLSClient::handle(QuicrObject&& obj)
       break;
     }
 
-
     default:
       throw std::runtime_error("Illegal operation in name: " +
                                std::to_string(op));
@@ -493,26 +492,17 @@ MLSClient::make_commit()
     };
   }
 
-  publish_commit(std::move(commit));
-}
-
-void
-MLSClient::publish_commit(bytes&& commit_data)
-{
-  logger->Log("Voting for our own Commit");
-  auto& session = std::get<MLSSession>(mls_session);
+  // Publish the commit
   const auto epoch = session.get_state().epoch();
   commit_votes.try_emplace(epoch);
   commit_votes.at(epoch).try_emplace(user_id, 0);
   commit_votes.at(epoch).at(user_id) += 1;
 
-  logger->Log("Caching our own Commit");
   commit_cache.try_emplace(epoch);
-  commit_cache.at(epoch).try_emplace(user_id, commit_data);
+  commit_cache.at(epoch).try_emplace(user_id, commit);
 
-  logger->Log("Publishing Commit Message");
   const auto commit_name = namespaces.for_commit(user_id, epoch);
-  publish(commit_name, std::move(commit_data));
+  publish(commit_name, std::move(commit));
 
   // This advances in the special case where there is one member in the group
   // (and thus we need no other votes)
