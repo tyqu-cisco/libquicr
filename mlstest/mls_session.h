@@ -29,7 +29,7 @@ struct ParsedLeaveRequest
 {
   uint32_t user_id;
   mls::epoch_t epoch;
-  mls::LeafIndex removed;
+  mls::LeafNode removed_leaf_node;
 };
 
 class MLSSession

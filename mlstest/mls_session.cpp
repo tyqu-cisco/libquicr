@@ -105,7 +105,7 @@ MLSSession::parse_leave(const bytes& leave_data)
   const auto leaf = mls_state.tree().leaf_node(remove.removed).value();
   const auto user_id = user_id_from_cred(leaf.credential);
 
-  return { { user_id, epoch, remove.removed } };
+  return { { user_id, epoch, std::move(leaf) } };
 }
 
 std::tuple<bytes, bytes>
@@ -121,11 +121,14 @@ MLSSession::commit(bool force_path,
     std::back_inserter(proposals),
     [&](const auto& req) { return mls_state.add_proposal(req.key_package); });
 
-  std::transform(
-    leaves.begin(),
-    leaves.end(),
-    std::back_inserter(proposals),
-    [&](const auto& req) { return mls_state.remove_proposal(req.removed); });
+  std::transform(leaves.begin(),
+                 leaves.end(),
+                 std::back_inserter(proposals),
+                 [&](const auto& req) {
+                   const auto index =
+                     mls_state.tree().find(req.removed_leaf_node);
+                   return mls_state.remove_proposal(index.value());
+                 });
 
   const auto commit_opts = CommitOpts{ proposals, true, force_path, {} };
   const auto [commit, welcome, next_state] =
@@ -191,7 +194,9 @@ MLSSession::should_commit(size_t n_adds,
   std::transform(leaves.begin(),
                  leaves.end(),
                  std::inserter(removed, removed.begin()),
-                 [](const auto& req) { return req.removed; });
+                 [&](const auto& req) {
+                   return mls_state.tree().find(req.removed_leaf_node).value();
+                 });
 
   auto affected = add_locations(n_adds, mls_state.tree());
   affected.insert(affected.end(), removed.begin(), removed.end());

@@ -99,7 +99,8 @@ private:
 
   // One lock for the whole object
   std::recursive_mutex self_mutex;
-  std::unique_lock<std::recursive_mutex> lock() {
+  std::unique_lock<std::recursive_mutex> lock()
+  {
     return std::unique_lock{ self_mutex };
   }
 

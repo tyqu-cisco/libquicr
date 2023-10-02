@@ -71,8 +71,6 @@ MLSClient::connect(bool as_creator)
     return false;
   }
 
-  // TODO(richbarn): Have appropriate mutexes on internal state
-
   // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
     while (!stop_threads) {
@@ -326,7 +324,8 @@ MLSClient::handle(QuicrObject&& obj)
 
       // Request an empty commit to populate my path in the tree
       const auto index = session.get_state().index();
-      old_leaf_node_to_commit = session.get_state().tree().leaf_node(index).value();
+      old_leaf_node_to_commit =
+        session.get_state().tree().leaf_node(index).value();
 
       return;
     }
@@ -462,11 +461,8 @@ MLSClient::make_commit()
   }
 
   logger->info << "Committing Join=#" << joins.size()
-               << " SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=";
-  for (const auto& leave : leaves) {
-    logger->info << leave.removed.val << ",";
-  }
-  logger->info << std::flush;
+               << " SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=#"
+               << leaves.size() << std::flush;
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
   if (!welcome_names.empty()) {
@@ -584,19 +580,15 @@ MLSClient::advance_if_quorum()
 
   // Groom the request queues, removing any requests that are obsolete
 
-  // Joins are obsolete if the joiner is already in the tree
+  // A join is obsolete if the joiner is already in the tree
   std::erase_if(joins_to_commit, [session](const auto& join) {
     return session.get_state().tree().find(join.key_package.leaf_node);
   });
 
-  // Leaves are always obsolete, because they are specific to an epoch
-  // XXX(richbarn): This request leavers to be persistent, to make sure their
-  // leave is reflected in a Commit.  Otherwise, members that have left will
-  // hang around in the tree.  The trouble is that the LeafIndex references can
-  // get invalidated.  We should probably fix this by noting which user /
-  // LeafNode is at the removed leaf in the real epoch, and checking that the
-  // correct leaf is being removed.
-  leaves_to_commit.clear();
+  // A leave is obsolete if the leaf node in question is no longer in the tree
+  std::erase_if(leaves_to_commit, [session](const auto& leave) {
+    return !session.get_state().tree().find(leave.removed_leaf_node);
+  });
 
   // A self-update request is obsolete if the old leaf node no longer appears
   if (old_leaf_node_to_commit) {
