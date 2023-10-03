@@ -187,16 +187,6 @@ MLSClient::latest_epoch()
 }
 
 bool
-MLSClient::should_commit(size_t n_adds,
-                         const std::vector<ParsedLeaveRequest>& leaves) const
-{
-  // TODO(richbarn): This method should be sensitive to what is being committed.
-  // For example, the tree stays maximally full if the neighbor of a removed
-  // node commits the remove.
-  return session().should_commit(n_adds, leaves);
-}
-
-bool
 MLSClient::subscribe(quicr::Namespace ns)
 {
   if (sub_delegates.count(ns)) {
@@ -296,7 +286,7 @@ MLSClient::handle(QuicrObject&& obj)
         return;
       }
 
-      joins_to_commit.push_back(std::move(parsed));
+      joins_to_commit.push_back(defer(std::move(parsed)));
       return;
     }
 
@@ -320,7 +310,7 @@ MLSClient::handle(QuicrObject&& obj)
         logger->Log("Ignoring leave request; user ID mismatch");
       }
 
-      leaves_to_commit.push_back(std::move(parsed));
+      leaves_to_commit.push_back(defer(std::move(parsed)));
       return;
     }
 
@@ -453,6 +443,29 @@ MLSClient::handle(QuicrObject&& obj)
   }
 }
 
+MLSClient::TimePoint
+MLSClient::not_before(uint32_t distance)
+{
+  auto now = std::chrono::system_clock::now();
+  return now + distance * commit_delay_unit;
+}
+
+MLSClient::Deferred<ParsedJoinRequest>
+MLSClient::defer(ParsedJoinRequest&& join)
+{
+  const auto& session = std::get<MLSSession>(mls_session);
+  const auto distance = session.distance_from(joins_to_commit.size(), {});
+  return { not_before(distance), std::move(join) };
+}
+
+MLSClient::Deferred<ParsedLeaveRequest>
+MLSClient::defer(ParsedLeaveRequest&& leave)
+{
+  const auto& session = std::get<MLSSession>(mls_session);
+  const auto distance = session.distance_from(0, { leave });
+  return { not_before(distance), std::move(leave) };
+}
+
 void
 MLSClient::make_commit()
 {
@@ -471,9 +484,23 @@ MLSClient::make_commit()
   // Import the requests
   groom_request_queues();
 
+  // Select the requests for which a commit is timely
   const auto self_update = old_leaf_node_to_commit.has_value();
-  const auto& joins = joins_to_commit;
-  const auto& leaves = leaves_to_commit;
+
+  const auto now = std::chrono::system_clock::now();
+  auto joins = std::vector<ParsedJoinRequest>{};
+  for (const auto& deferred : joins_to_commit) {
+    if (deferred.not_before < now) {
+      joins.push_back(deferred.request);
+    }
+  }
+
+  auto leaves = std::vector<ParsedLeaveRequest>{};
+  for (const auto& deferred : leaves_to_commit) {
+    if (deferred.not_before < now) {
+      leaves.push_back(deferred.request);
+    }
+  }
 
   // Compute the set of names to send a welcome to (if any)
   auto welcome_names = std::vector<quicr::Name>{};
@@ -491,13 +518,7 @@ MLSClient::make_commit()
     return;
   }
 
-  // XXX(richbarn): In this ad-hoc batched mode, this is no longer reliable.
-  // Replace with a time-based solution.
-  if (!self_update && !should_commit(joins.size(), leaves)) {
-    logger->Log("Not committing; not the designated committer");
-    return;
-  }
-
+  // Perform the commit
   logger->info << "Committing Join=[";
   for (const auto& join : joins) {
     logger->info << join.user_id << ",";
@@ -631,8 +652,8 @@ void
 MLSClient::groom_request_queues()
 {
   const auto& session = std::get<MLSSession>(mls_session);
-  const auto obsolete = [session](const auto& req) {
-    return session.obsolete(req);
+  const auto obsolete = [session](const auto& deferred) {
+    return session.obsolete(deferred.request);
   };
 
   std::erase_if(joins_to_commit, obsolete);

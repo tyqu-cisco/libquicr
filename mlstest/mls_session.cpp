@@ -115,7 +115,7 @@ MLSSession::parse_leave(const bytes& leave_data)
   const auto leaf = mls_state.tree().leaf_node(remove.removed).value();
   const auto user_id = user_id_from_cred(leaf.credential);
 
-  return { { user_id, epoch, std::move(leaf) } };
+  return { { user_id, epoch } };
 }
 
 bool
@@ -190,24 +190,16 @@ add_locations(size_t n_adds, const TreeKEMPublicKey& tree)
 }
 
 static uint32_t
-topological_distance(LeafIndex a, LeafIndex b)
-{
-  return a.ancestor(b).level();
-}
-
-static uint32_t
 total_distance(LeafIndex a, const std::vector<LeafIndex>& b)
 {
   return std::accumulate(b.begin(), b.end(), 0, [&](auto last, auto bx) {
-    return last + topological_distance(a, bx);
+    const auto topological_distance = a.ancestor(bx).level();
+    return last + topological_distance;
   });
 }
 
-// XXX(richbarn) This method currently returns a boolean, but we might want to
-// have it return the raw distance metric.  This would support a "jump ball"
-// commit strategy, where the closest nodes in the tree commit fastest.
-bool
-MLSSession::should_commit(size_t n_adds,
+uint32_t
+MLSSession::distance_from(size_t n_adds,
                           const std::vector<ParsedLeaveRequest>& leaves) const
 {
   // A node should commit if:
@@ -226,33 +218,12 @@ MLSSession::should_commit(size_t n_adds,
     leaves.begin(),
     leaves.end(),
     std::inserter(removed, removed.begin()),
-    [&](const auto& req) {
-      return leaf_for_user_id(req.user_id).value();
-    });
+    [&](const auto& req) { return leaf_for_user_id(req.user_id).value(); });
 
   auto affected = add_locations(n_adds, mls_state.tree());
   affected.insert(affected.end(), removed.begin(), removed.end());
 
-  auto min_index = std::optional<LeafIndex>{};
-  auto min_dist = std::optional<uint32_t>{};
-  mls_state.tree().all_leaves([&](auto i, const auto& /* unused */) {
-    if (removed.contains(i)) {
-      // A removed leaf can't commit
-      return true;
-    }
-
-    const auto dist = total_distance(i, affected);
-    if (min_dist && dist >= min_dist) {
-      // If this node is non-minimal, keep looking
-      return true;
-    }
-
-    min_index = i;
-    min_dist = dist;
-    return true;
-  });
-
-  return mls_state.index() == min_index;
+  return total_distance(mls_state.index(), affected);
 }
 
 bytes

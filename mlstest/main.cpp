@@ -298,7 +298,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create and tear down a large group in parallel")
   }
 
   // Brief pause to let all the commits quiet down
-  std::this_thread::sleep_for(200ms);
+  std::this_thread::sleep_for(500ms);
 
   // Verify that the creator is now alone
   const auto max_expected_epoch = 3 * joiners.size();

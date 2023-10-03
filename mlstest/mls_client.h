@@ -82,9 +82,6 @@ private:
   std::map<uint64_t, std::map<uint32_t, bytes>> commit_cache;
   AsyncQueue<Epoch> epochs;
 
-  bool should_commit(size_t n_adds,
-                     const std::vector<ParsedLeaveRequest>& removed) const;
-
   // One lock for the whole object; one stop signal for all threads
   std::recursive_mutex self_mutex;
   std::unique_lock<std::recursive_mutex> lock()
@@ -113,9 +110,24 @@ private:
   void groom_request_queues();
 
   // Commit thread
-  static constexpr auto commit_interval = std::chrono::milliseconds(250);
-  std::vector<ParsedJoinRequest> joins_to_commit;
-  std::vector<ParsedLeaveRequest> leaves_to_commit;
+  static constexpr auto commit_interval = std::chrono::milliseconds(100);
+  static constexpr auto commit_delay_unit = std::chrono::milliseconds(75);
+
+  using TimePoint = std::chrono::time_point<std::chrono::system_clock>;
+
+  template<typename T>
+  struct Deferred
+  {
+    TimePoint not_before;
+    T request;
+  };
+
+  static TimePoint not_before(uint32_t distance);
+  Deferred<ParsedJoinRequest> defer(ParsedJoinRequest&& join);
+  Deferred<ParsedLeaveRequest> defer(ParsedLeaveRequest&& leave);
+
+  std::vector<Deferred<ParsedJoinRequest>> joins_to_commit;
+  std::vector<Deferred<ParsedLeaveRequest>> leaves_to_commit;
   std::optional<mls::LeafNode> old_leaf_node_to_commit;
 
   std::optional<std::thread> commit_thread;

@@ -30,7 +30,6 @@ struct ParsedLeaveRequest
 {
   uint32_t user_id;
   mls::epoch_t epoch;
-  mls::LeafNode removed_leaf_node;
 };
 
 class MLSSession
@@ -60,9 +59,9 @@ public:
   bool current(const bytes& message) const;
   bool future(const bytes& message) const;
 
-  // Whether this client should commit in a given situation
-  bool should_commit(size_t n_adds,
-                     const std::vector<ParsedLeaveRequest>& leaves) const;
+  // Measure the proximity of this member to a set of changes
+  uint32_t distance_from(size_t n_adds,
+                         const std::vector<ParsedLeaveRequest>& leaves) const;
 
   // Vote handling
   enum struct VoteType : uint8_t
