@@ -498,9 +498,15 @@ MLSClient::make_commit()
     return;
   }
 
-  logger->info << "Committing Join=#" << joins.size()
-               << " SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=#"
-               << leaves.size() << std::flush;
+  logger->info << "Committing Join=[";
+  for (const auto& join : joins) {
+    logger->info << join.user_id << ",";
+  }
+  logger->info << "] SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=[";
+  for (const auto& leave : leaves) {
+    logger->info << leave.user_id << ",";
+  }
+  logger->info << "]" << std::flush;
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
   pending_commit = PendingCommit{
@@ -625,7 +631,10 @@ void
 MLSClient::groom_request_queues()
 {
   const auto& session = std::get<MLSSession>(mls_session);
-  const auto obsolete = [session](const auto& req) { return session.obsolete(req); };
+  const auto obsolete = [session](const auto& req) {
+    return session.obsolete(req);
+  };
+
   std::erase_if(joins_to_commit, obsolete);
   std::erase_if(leaves_to_commit, obsolete);
 

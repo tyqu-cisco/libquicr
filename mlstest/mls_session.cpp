@@ -71,13 +71,14 @@ MLSSession::parse_join(const bytes& join_data)
 bool
 MLSSession::obsolete(const ParsedJoinRequest& req) const
 {
-  return !!get_state().tree().find(req.key_package.leaf_node);
+  return !!leaf_for_user_id(req.user_id);
 }
 
 bytes
 MLSSession::leave()
 {
-  const auto remove_proposal = mls_state.remove(mls_state.index(), {});
+  const auto index = get_state().index();
+  const auto remove_proposal = get_state().remove(index, {});
   return tls::marshal(remove_proposal);
 }
 
@@ -86,12 +87,15 @@ MLSSession::parse_leave(const bytes& leave_data)
 {
   // Import the message
   const auto leave_message = tls::get<MLSMessage>(leave_data);
-  if (leave_message.group_id() != mls_state.group_id()) {
+  const auto group_id = leave_message.group_id();
+  const auto epoch = leave_message.epoch();
+
+  if (!has_state(epoch)) {
     return std::nullopt;
   }
 
-  const auto epoch = leave_message.epoch();
-  if (epoch != mls_state.epoch()) {
+  auto mls_state = get_state(epoch);
+  if (leave_message.group_id() != mls_state.group_id()) {
     return std::nullopt;
   }
 
@@ -117,7 +121,7 @@ MLSSession::parse_leave(const bytes& leave_data)
 bool
 MLSSession::obsolete(const ParsedLeaveRequest& req) const
 {
-  return !get_state().tree().find(req.removed_leaf_node);
+  return !leaf_for_user_id(req.user_id);
 }
 
 std::tuple<bytes, bytes>
@@ -125,6 +129,7 @@ MLSSession::commit(bool force_path,
                    const std::vector<ParsedJoinRequest>& joins,
                    const std::vector<ParsedLeaveRequest>& leaves)
 {
+  auto& mls_state = get_state();
   auto proposals = std::vector<Proposal>{};
 
   std::transform(
@@ -137,8 +142,7 @@ MLSSession::commit(bool force_path,
                  leaves.end(),
                  std::back_inserter(proposals),
                  [&](const auto& req) {
-                   const auto index =
-                     mls_state.tree().find(req.removed_leaf_node);
+                   const auto index = leaf_for_user_id(req.user_id);
                    return mls_state.remove_proposal(index.value());
                  });
 
@@ -158,14 +162,14 @@ bool
 MLSSession::current(const bytes& message_data) const
 {
   const auto epoch = tls::get<MLSMessage>(message_data).epoch();
-  return epoch == mls_state.epoch();
+  return epoch == get_state().epoch();
 }
 
 bool
 MLSSession::future(const bytes& message_data) const
 {
   const auto epoch = tls::get<MLSMessage>(message_data).epoch();
-  return epoch > mls_state.epoch();
+  return epoch > get_state().epoch();
 }
 
 static std::vector<LeafIndex>
@@ -216,13 +220,15 @@ MLSSession::should_commit(size_t n_adds,
   // total topological distance at each leaf node and updating only if the
   // distance is lowest than the lowest known.
 
+  auto& mls_state = get_state();
   auto removed = std::set<mls::LeafIndex>{};
-  std::transform(leaves.begin(),
-                 leaves.end(),
-                 std::inserter(removed, removed.begin()),
-                 [&](const auto& req) {
-                   return mls_state.tree().find(req.removed_leaf_node).value();
-                 });
+  std::transform(
+    leaves.begin(),
+    leaves.end(),
+    std::inserter(removed, removed.begin()),
+    [&](const auto& req) {
+      return leaf_for_user_id(req.user_id).value();
+    });
 
   auto affected = add_locations(n_adds, mls_state.tree());
   affected.insert(affected.end(), removed.begin(), removed.end());
@@ -253,7 +259,7 @@ bytes
 MLSSession::wrap_vote(const Vote& vote)
 {
   const auto vote_data = tls::marshal(vote);
-  const auto message = mls_state.protect({}, vote_data, 0);
+  const auto message = get_state().protect({}, vote_data, 0);
   return tls::marshal(message);
 }
 
@@ -261,7 +267,7 @@ MLSSession::Vote
 MLSSession::unwrap_vote(const bytes& vote_data)
 {
   const auto message = tls::get<MLSMessage>(vote_data);
-  const auto [_aad, pt] = mls_state.unprotect(message);
+  const auto [_aad, pt] = get_state(message.epoch()).unprotect(message);
   return tls::get<Vote>(pt);
 }
 
@@ -269,7 +275,7 @@ MLSSession::HandleResult
 MLSSession::handle(const bytes& commit_data)
 {
   if (commit_data == cached_commit) {
-    mls_state = std::move(cached_next_state.value());
+    add_state(std::move(cached_next_state.value()));
     cached_commit.reset();
     cached_next_state.reset();
     return HandleResult::ok;
@@ -277,7 +283,7 @@ MLSSession::handle(const bytes& commit_data)
 
   // The caller should assure that any handled commits are timely
   const auto commit_message = tls::get<MLSMessage>(commit_data);
-  if (commit_message.epoch() != mls_state.epoch()) {
+  if (commit_message.epoch() != get_state().epoch()) {
     return HandleResult::fail;
   }
 
@@ -288,7 +294,7 @@ MLSSession::handle(const bytes& commit_data)
   // be erased.  Instead we assume that any failure due to an invalid proposal
   // list is this type of failure
   try {
-    mls_state = tls::opt::get(mls_state.handle(commit_message));
+    add_state(tls::opt::get(get_state().handle(commit_message)));
   } catch (const ProtocolError& exc) {
     if (std::string(exc.what()) == "Invalid proposal list") {
       return HandleResult::removes_me;
@@ -300,17 +306,56 @@ MLSSession::handle(const bytes& commit_data)
   return HandleResult::ok;
 }
 
+void
+MLSSession::add_state(State&& state)
+{
+  while (history.size() > max_history_depth) {
+    history.pop_back();
+  }
+  history.push_front(std::move(state));
+}
+
 const mls::State&
 MLSSession::get_state() const
 {
-  return mls_state;
+  return history.front();
+}
+
+mls::State&
+MLSSession::get_state()
+{
+  return history.front();
+}
+
+bool
+MLSSession::has_state(epoch_t epoch)
+{
+  auto it =
+    std::find_if(history.begin(), history.end(), [&](const auto& state) {
+      return state.epoch() == epoch;
+    });
+  return it != history.end();
+}
+
+mls::State&
+MLSSession::get_state(epoch_t epoch)
+{
+  auto it =
+    std::find_if(history.begin(), history.end(), [&](const auto& state) {
+      return state.epoch() == epoch;
+    });
+  if (it == history.end()) {
+    throw std::runtime_error("No state for epoch");
+  }
+
+  return *it;
 }
 
 size_t
 MLSSession::member_count() const
 {
   size_t members = 0;
-  mls_state.tree().all_leaves([&](auto /* i */, const auto& /* leaf */) {
+  get_state().tree().all_leaves([&](auto /* i */, const auto& /* leaf */) {
     members += 1;
     return true;
   });
@@ -318,14 +363,14 @@ MLSSession::member_count() const
 }
 
 MLSSession::MLSSession(mls::State&& state)
-  : mls_state(state)
 {
+  add_state(std::move(state));
 }
 
 bytes
 MLSSession::fresh_secret() const
 {
-  return random_bytes(mls_state.cipher_suite().secret_size());
+  return random_bytes(get_state().cipher_suite().secret_size());
 }
 
 uint32_t
@@ -333,4 +378,20 @@ MLSSession::user_id_from_cred(const Credential& cred)
 {
   const auto& basic_cred = cred.get<BasicCredential>();
   return tls::get<uint32_t>(basic_cred.identity);
+}
+
+std::optional<LeafIndex>
+MLSSession::leaf_for_user_id(uint32_t user_id) const
+{
+  auto out = std::optional<LeafIndex>{};
+  get_state().tree().any_leaf([&](auto i, const auto& leaf) {
+    auto match = user_id_from_cred(leaf.credential) == user_id;
+    if (match) {
+      out = i;
+    }
+
+    return match;
+  });
+
+  return out;
 }

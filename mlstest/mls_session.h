@@ -4,6 +4,7 @@
 #include <mls/common.h>
 #include <mls/state.h>
 
+#include <deque>
 #include <memory>
 
 // Information needed per user to populate MLS state
@@ -91,6 +92,7 @@ public:
   HandleResult handle(const bytes& commit_data);
 
   // Access to the underlying MLS state
+  mls::State& get_state();
   const mls::State& get_state() const;
   size_t member_count() const;
 
@@ -99,10 +101,16 @@ private:
   bytes fresh_secret() const;
 
   static uint32_t user_id_from_cred(const mls::Credential& cred);
+  std::optional<mls::LeafIndex> leaf_for_user_id(uint32_t user_id) const;
 
-  mls::State mls_state;
+  void add_state(mls::State&& state);
+  bool has_state(mls::epoch_t epoch);
+  mls::State& get_state(mls::epoch_t epoch);
+
+  std::deque<mls::State> history;
   std::optional<bytes> cached_commit;
   std::optional<mls::State> cached_next_state;
 
+  static constexpr size_t max_history_depth = 10;
   static const mls::MessageOpts message_opts;
 };

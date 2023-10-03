@@ -298,28 +298,11 @@ TEST_CASE_FIXTURE(MLSTest, "Create and tear down a large group in parallel")
   }
 
   // Brief pause to let all the commits quiet down
-  std::this_thread::sleep_for(2000ms);
+  std::this_thread::sleep_for(200ms);
 
   // Verify that the creator is now alone
   const auto max_expected_epoch = 3 * joiners.size();
   const auto creator_epoch = creator.latest_epoch();
   REQUIRE(creator_epoch.epoch <= max_expected_epoch);
-  // XXX(richbarn): This test fails intermittently.  It appears that all of the
-  // leave requests are being delivered, but they are not getting committed. The
-  // failures seem to always happen with the following log lines:
-  //
-  //   2023-10-02T18:15:01.429781 [INFO] [Alice] Committing Join=#1 SelfUpdate=N Leave=#0
-  //   2023-10-02T18:15:02.040975 [INFO] [Alice] Received Leave, sender=1
-  //   2023-10-02T18:15:02.075822 [INFO] [Alice] Received Leave, sender=2
-  //   2023-10-02T18:15:02.192246 [INFO] [Alice] Committing Join=#0 SelfUpdate=N Leave=#2
-  //   2023-10-02T18:17:35.216421 [INFO] [Alice] Received Leave, sender=3
-  //   2023-10-02T18:17:35.216456 [INFO] [Alice] Ignoring leave request; unable to process
-  //   2023-10-02T18:15:02.336421 [INFO] [Alice] Received Leave, sender=4
-  //   2023-10-02T18:15:02.451679 [INFO] [Alice] Committing Join=#0 SelfUpdate=N Leave=#1
-  //
-  // The "unable to process" message appears to indicate that the epoch of
-  // Leave(3) was not correct.  In particular, it was an *old* epoch, since a
-  // future epoch would have gotten cached.  Seems like we need to keep around a
-  // few old epochs.
   REQUIRE(creator_epoch.member_count == 1);
 }
