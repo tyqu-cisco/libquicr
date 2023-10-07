@@ -14,6 +14,7 @@ MLSClient::MLSClient(const Config& config)
   , group_id(config.group_id)
   , user_id(config.user_id)
   , namespaces(NamespaceConfig(group_id))
+  , epoch_server(config.epoch_server)
   , mls_session(MLSInitInfo{ suite, user_id })
   , inbound_objects(std::make_shared<AsyncQueue<QuicrObject>>())
 {
@@ -32,18 +33,57 @@ MLSClient::~MLSClient()
 }
 
 bool
-MLSClient::connect(bool as_creator)
+MLSClient::maybe_create_session()
+{
+  using namespace epoch;
+  static const auto invalid_tx_retry = std::chrono::milliseconds(100);
+
+  // Get permission to create the group
+  const auto init_resp = epoch_server->create_init(group_id);
+  if (std::holds_alternative<create_init::Created>(init_resp)) {
+    return false;
+  }
+
+  if (std::holds_alternative<create_init::Conflict>(init_resp)) {
+    const auto& conflict = std::get<create_init::Conflict>(init_resp);
+    std::this_thread::sleep_until(conflict.retry_after);
+    return maybe_create_session();
+  }
+
+  const auto& init_ok = std::get<create_init::OK>(init_resp);
+  const auto tx_id = init_ok.transaction_id;
+
+  // Create the group
+  const auto init_info = std::get<MLSInitInfo>(mls_session);
+  const auto session = MLSSession::create(init_info, group_id);
+
+  // Report that the group has been created
+  const auto complete_resp = epoch_server->create_complete(group_id, tx_id);
+  if (std::holds_alternative<create_complete::Created>(complete_resp)) {
+    return false;
+  }
+
+  if (std::holds_alternative<create_complete::InvalidTransaction>(
+        complete_resp)) {
+    std::this_thread::sleep_for(invalid_tx_retry);
+    return maybe_create_session();
+  }
+
+  // Install the group
+  mls_session = session;
+  return true;
+}
+
+bool
+MLSClient::connect()
 {
   // Connect to the quicr relay
   if (!client->connect()) {
     return false;
   }
 
-  // Initialize MLS state
-  if (as_creator) {
-    const auto init_info = std::get<MLSInitInfo>(mls_session);
-    mls_session = MLSSession::create(init_info, group_id);
-  }
+  // Determine whether to create the group
+  auto created_session = maybe_create_session();
 
   // XXX(richbarn) These subscriptions / publishes are done serially; we await a
   // response for each one before doing the next.  They could be done in
@@ -53,7 +93,7 @@ MLSClient::connect(bool as_creator)
   // Subscribe to the required namespaces
   auto success = true;
   success = success && subscribe(namespaces.key_package_sub());
-  if (!as_creator) {
+  if (!created_session) {
     success = success && subscribe(namespaces.welcome_sub());
   }
   success = success && subscribe(namespaces.commit_sub());
@@ -368,72 +408,7 @@ MLSClient::handle(QuicrObject&& obj)
         return;
       }
 
-      // Record the committer's vote for themselves
-      commit_votes.try_emplace(epoch);
-      commit_votes.at(epoch).try_emplace(sender, 0);
-      commit_votes.at(epoch).at(sender) += 1;
-
-      // Add the commit to the cache
-      commit_cache.try_emplace(epoch);
-      commit_cache.at(epoch).insert_or_assign(sender, obj.data);
-
-      // If this is the first commit for this epoch...
-      if (commit_cache.at(epoch).size() == 1) {
-        // Record our own vote
-        commit_votes.at(epoch).at(sender) += 1;
-
-        // Broadcast it to others
-        logger->Log("Sending CommitVote for epoch=" + std::to_string(epoch) +
-                    " committer=" + std::to_string(sender));
-        auto& session = std::get<MLSSession>(mls_session);
-        auto vote =
-          session.wrap_vote({ MLSSession::VoteType::commit, epoch, sender });
-        const auto vote_name = namespaces.for_commit_vote(user_id, epoch);
-        publish(vote_name, std::move(vote));
-      }
-
-      // Advance if we are able
-      advance_if_quorum();
-      return;
-    }
-
-    case NamespaceConfig::Operation::commit_vote: {
-      logger->Log("Received CommitVote");
-
-      if (!joined()) {
-        logger->Log("Ignoring CommitVote; not joined to the group");
-        return;
-      }
-
-      auto epoch = uint64_t(third_name_value);
-      auto& session = std::get<MLSSession>(mls_session);
-      if (epoch != session.get_state().epoch()) {
-        logger->Log("Ignoring CommitVote; wrong epoch (" +
-                    std::to_string(epoch) +
-                    " != " + std::to_string(session.get_state().epoch()) + ")");
-        return;
-      }
-
-      auto vote = session.unwrap_vote(obj.data);
-      if (vote.type != MLSSession::VoteType::commit) {
-        logger->Log("Invalid CommitVote; wrong type");
-        return;
-      }
-
-      if (vote.id != epoch) {
-        logger->Log("Invalid CommitVote; wrong ID");
-        return;
-      }
-
-      // Record the vote
-      logger->Log("Recording vote for epoch=" + std::to_string(epoch) +
-                  " committer=" + std::to_string(vote.vote));
-      commit_votes.try_emplace(epoch);
-      commit_votes.at(epoch).try_emplace(vote.vote, 0);
-      commit_votes.at(epoch).at(vote.vote) += 1;
-
-      // Advance if we are able
-      advance_if_quorum();
+      advance(obj.data);
       return;
     }
 
@@ -469,6 +444,8 @@ MLSClient::defer(ParsedLeaveRequest&& leave)
 void
 MLSClient::make_commit()
 {
+  using namespace epoch;
+
   // Can't commit if we're not joined
   if (!joined()) {
     return;
@@ -518,7 +495,7 @@ MLSClient::make_commit()
     return;
   }
 
-  // Perform the commit
+  // Construct the commit
   logger->info << "Committing Join=[";
   for (const auto& join : joins) {
     logger->info << join.user_id << ",";
@@ -530,66 +507,58 @@ MLSClient::make_commit()
   logger->info << "]" << std::flush;
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
-  pending_commit = PendingCommit{
-    .commit = commit,
-    .welcome = welcome,
-    .welcome_names = welcome_names,
-  };
-
-  // Publish the commit
+  // Get permission to send a commit
   const auto epoch = session.get_state().epoch();
-  commit_votes.try_emplace(epoch);
-  commit_votes.at(epoch).try_emplace(user_id, 0);
-  commit_votes.at(epoch).at(user_id) += 1;
+  const auto init_resp = epoch_server->commit_init(group_id, epoch);
+  if (std::holds_alternative<commit_init::InvalidEpoch>(init_resp)) {
+    const auto server_epoch =
+      std::get<commit_init::InvalidEpoch>(init_resp).current_epoch;
+    logger->info << "Failed to initiate - epoch mismatch - mine=" << epoch
+                 << " server=" << server_epoch << std::flush;
+    return;
+  }
 
-  commit_cache.try_emplace(epoch);
-  commit_cache.at(epoch).try_emplace(user_id, commit);
+  if (!std::holds_alternative<commit_init::OK>(init_resp)) {
+    // Permission denied for some other reason
+    logger->info << "Failed to initiate commit code=" << init_resp.index()
+                 << std::flush;
+    return;
+  }
 
+  const auto& init_ok = std::get<commit_init::OK>(init_resp);
+  const auto tx_id = init_ok.transaction_id;
+
+  // Publish the commit and update our own state
   const auto commit_name = namespaces.for_commit(user_id, epoch);
-  publish(commit_name, std::move(commit));
+  auto commit_copy = commit;
+  publish(commit_name, std::move(commit_copy));
 
-  // This advances in the special case where there is one member in the group
-  // (and thus we need no other votes)
-  advance_if_quorum();
+  // Inform the epoch server that the commit has been sent
+  const auto complete_resp =
+    epoch_server->commit_complete(group_id, epoch, tx_id);
+  if (!std::holds_alternative<commit_complete::OK>(complete_resp)) {
+    // Something went wrong, abort and hope everyone ignores the commit
+    logger->info << "Failed to complete commit code=" << complete_resp.index()
+                 << std::flush;
+    return;
+  }
+
+  // Publish the Welcome and update our own state now that everything is OK
+  advance(commit);
+
+  for (const auto& name : welcome_names) {
+    auto welcome_copy = welcome;
+    publish(name, std::move(welcome));
+  }
 }
 
 void
-MLSClient::advance_if_quorum()
+MLSClient::advance(const bytes& commit)
 {
   logger->Log("Attempting to advance the MLS state...");
+
+  // Apply the commit
   auto& session = std::get<MLSSession>(mls_session);
-  const auto epoch = session.get_state().epoch();
-
-  // XXX(richbarn) This is wrong, it should be (n/2)+1.  It has been reduced by
-  // one so that we don't hang in the case where the last member is being
-  // removed from a two-member group.
-  const auto quorum = (session.member_count() / 2);
-
-  if (!commit_votes.contains(epoch)) {
-    logger->Log("Failed to advance; no votes for this epoch");
-    return;
-  }
-
-  const auto& votes = commit_votes.at(epoch);
-  const auto committer_it =
-    std::find_if(votes.begin(), votes.end(), [&](const auto& pair) {
-      return pair.second >= quorum;
-    });
-
-  if (committer_it == votes.end()) {
-    // No quorum
-    logger->Log("Failed to advance; No quorum");
-    return;
-  }
-
-  const auto committer = committer_it->first;
-  if (!commit_cache.at(epoch).contains(committer)) {
-    // No commit cached
-    logger->Log("Failed to advance; Commit is not yet available");
-    return;
-  }
-
-  const auto& commit = commit_cache.at(epoch).at(committer);
   switch (session.handle(commit)) {
     case MLSSession::HandleResult::ok:
       epochs.push({ session.get_state().epoch(),
@@ -619,18 +588,6 @@ MLSClient::advance_if_quorum()
       logger->Log("Failed to advance; reason unknown");
       return;
   }
-
-  // If this was a commit we created and there is a corresponding Welcome,
-  // release the Welcome to the new joiners
-  if (pending_commit && pending_commit.value().commit == commit) {
-    const auto& pc = pending_commit.value();
-    for (const auto& name : pc.welcome_names) {
-      auto welcome = pc.welcome;
-      publish(name, std::move(welcome));
-    }
-  }
-
-  pending_commit.reset();
 
   // Groom the request queues, removing any requests that are obsolete
   groom_request_queues();

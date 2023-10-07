@@ -1,6 +1,7 @@
 #pragma once
 
 #include "async_queue.h"
+#include "epoch_server.h"
 #include "mls_session.h"
 #include "namespace_config.h"
 #include "sub_delegate.h"
@@ -24,13 +25,14 @@ public:
     uint32_t user_id;
     cantina::LoggerPointer logger;
     quicr::RelayInfo relay;
+    std::shared_ptr<epoch::Server> epoch_server;
   };
 
   explicit MLSClient(const Config& config);
   ~MLSClient();
 
   // Connect to the server and make subscriptions
-  bool connect(bool as_creator);
+  bool connect();
   void disconnect();
 
   // MLS operations
@@ -75,12 +77,15 @@ private:
     mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256
   };
 
+  std::shared_ptr<epoch::Server> epoch_server;
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
 
   std::map<uint64_t, std::map<uint32_t, size_t>> commit_votes;
   std::map<uint64_t, std::map<uint32_t, bytes>> commit_cache;
   AsyncQueue<Epoch> epochs;
+
+  bool maybe_create_session();
 
   // One lock for the whole object; one stop signal for all threads
   std::recursive_mutex self_mutex;
@@ -106,7 +111,7 @@ private:
   std::optional<std::thread> handler_thread;
 
   void handle(QuicrObject&& obj);
-  void advance_if_quorum();
+  void advance(const bytes& commit);
   void groom_request_queues();
 
   // Commit thread

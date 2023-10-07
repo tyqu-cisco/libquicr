@@ -112,8 +112,7 @@ TEST_CASE("In-memory epoch server")
     const auto ok2 = std::get<commit_init::OK>(init_resp3);
     const auto complete_resp4 =
       epoch_server->commit_complete(group_id, 0, ok2.transaction_id);
-    REQUIRE(std::holds_alternative<commit_complete::OK>(
-      complete_resp4));
+    REQUIRE(std::holds_alternative<commit_complete::OK>(complete_resp4));
 
     // Attempting to commit with a too-old or too-new epoch should fail
     const auto init_resp4 = epoch_server->commit_init(group_id, 0);
@@ -129,8 +128,6 @@ TEST_CASE("In-memory epoch server")
     const auto ok3 = std::get<commit_init::OK>(init_resp6);
     const auto complete_resp5 =
       epoch_server->commit_complete(group_id, 1, ok3.transaction_id);
-    REQUIRE(std::holds_alternative<commit_complete::OK>(
-      complete_resp5));
-
+    REQUIRE(std::holds_alternative<commit_complete::OK>(complete_resp5));
   }
 }

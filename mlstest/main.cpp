@@ -12,6 +12,7 @@ class MLSTest
 public:
   MLSTest()
     : logger(std::make_shared<cantina::Logger>(true))
+    , epoch_server(std::make_shared<epoch::InMemoryServer>())
   {
     // Connect to a relay
     const auto* relay_var = getenv("MLS_RELAY");
@@ -40,6 +41,8 @@ protected:
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
 
+  std::shared_ptr<epoch::Server> epoch_server;
+
   static constexpr auto user_names = std::array<const char*, 5>{
     "Alice", "Bob", "Charlie", "Diana", "Ellen",
   };
@@ -54,6 +57,7 @@ protected:
       .user_id = next_user_id,
       .logger = user_logger,
       .relay = relay,
+      .epoch_server = epoch_server,
     };
 
     next_user_id += 1;
@@ -65,10 +69,10 @@ TEST_CASE_FIXTURE(MLSTest, "Create a two-person group")
 {
   // Initialize and connect two users
   auto creator = MLSClient{ next_config() };
-  REQUIRE(creator.connect(true));
+  REQUIRE(creator.connect());
 
   auto joiner = MLSClient{ next_config() };
-  REQUIRE(joiner.connect(false));
+  REQUIRE(joiner.connect());
 
   // Joiner publishes KeyPackage
   REQUIRE(joiner.join().get());
@@ -99,7 +103,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group")
 
   // Initialize and connect the creator
   auto creator = MLSClient{ next_config() };
-  creator.connect(true);
+  creator.connect();
 
   // For each remaining client...
   // (The shared_ptr is necessary to store an MLSClient in a vector, since
@@ -111,7 +115,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group")
     joiners.push_back(joiner);
 
     // Join the group
-    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->connect());
     REQUIRE(joiner->join().get());
     REQUIRE(joiner->joined());
 
@@ -143,7 +147,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group then tear down")
 
   // Initialize and connect the creator
   auto creator = MLSClient{ next_config() };
-  creator.connect(true);
+  creator.connect();
 
   // Add each remaining client
   // (The shared_ptr is necessary to store an MLSClient in a vector, since
@@ -156,7 +160,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group then tear down")
     members.push_back(joiner);
 
     // Join the group
-    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->connect());
     REQUIRE(joiner->join().get());
     REQUIRE(joiner->joined());
 
@@ -224,7 +228,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group in parallel")
 
   // Initialize and connect the creator
   auto creator = MLSClient{ next_config() };
-  creator.connect(true);
+  creator.connect();
 
   // For each remaining client...
   // (The shared_ptr is necessary to store an MLSClient in a vector, since
@@ -237,7 +241,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create a large group in parallel")
     joiners.push_back(joiner);
 
     // Join the group without waiting
-    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->connect());
     join_futures.push_back(joiner->join());
   }
 
@@ -266,7 +270,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create and tear down a large group in parallel")
 
   // Initialize and connect the creator
   auto creator = MLSClient{ next_config() };
-  creator.connect(true);
+  creator.connect();
 
   // For each remaining client...
   // (The shared_ptr is necessary to store an MLSClient in a vector, since
@@ -279,7 +283,7 @@ TEST_CASE_FIXTURE(MLSTest, "Create and tear down a large group in parallel")
     joiners.push_back(joiner);
 
     // Join the group without waiting
-    REQUIRE(joiner->connect(false));
+    REQUIRE(joiner->connect());
     join_futures.push_back(joiner->join());
   }
 
