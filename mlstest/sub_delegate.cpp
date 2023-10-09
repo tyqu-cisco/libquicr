@@ -3,12 +3,15 @@
 #include <sstream>
 
 SubDelegate::SubDelegate(cantina::LoggerPointer logger_in,
-                         std::shared_ptr<AsyncQueue<QuicrObject>> queue_in,
-                         std::promise<bool> on_response_in)
+                         channel::Sender<QuicrObject>&& queue_in)
   : logger(std::move(logger_in))
   , queue(std::move(queue_in))
-  , on_response(std::move(on_response_in))
 {
+}
+
+bool SubDelegate::await_response() const {
+  response_latch.wait();
+  return successfully_connected;
 }
 
 void
@@ -18,11 +21,9 @@ SubDelegate::onSubscribeResponse(const quicr::Namespace& quicr_namespace,
   logger->info << "onSubscriptionResponse: ns: " << quicr_namespace
                << " status: " << static_cast<int>(result.status) << std::flush;
 
-  if (on_response) {
-    on_response->set_value(result.status ==
-                           quicr::SubscribeResult::SubscribeStatus::Ok);
-    on_response.reset();
-  }
+  successfully_connected = result.status ==
+                           quicr::SubscribeResult::SubscribeStatus::Ok;
+  response_latch.count_down();
 }
 
 void
@@ -52,7 +53,7 @@ SubDelegate::onSubscribedObject(const quicr::Name& quicr_name,
   }
 
   logger->info << std::flush;
-  queue->push({ quicr_name, std::move(data) });
+  queue.send({ quicr_name, std::move(data) });
 }
 
 void

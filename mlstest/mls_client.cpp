@@ -7,6 +7,8 @@
 using namespace mls;
 using namespace std::chrono_literals;
 
+static const size_t epochs_capacity = 100;
+static const size_t inbound_objects_capacity = 1000;
 static const uint16_t default_ttl_ms = 1000;
 
 MLSClient::MLSClient(const Config& config)
@@ -16,7 +18,8 @@ MLSClient::MLSClient(const Config& config)
   , namespaces(NamespaceConfig(group_id))
   , epoch_server(config.epoch_server)
   , mls_session(MLSInitInfo{ suite, user_id })
-  , inbound_objects(std::make_shared<AsyncQueue<QuicrObject>>())
+  , epochs(epochs_capacity)
+  , inbound_objects(inbound_objects_capacity)
 {
   // Set up Quicr relay connection
   logger->Log("Connecting to " + config.relay.hostname + ":" +
@@ -114,7 +117,7 @@ MLSClient::connect()
   // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
     while (!stop_threads) {
-      auto maybe_obj = inbound_objects->pop(inbound_object_timeout);
+      auto maybe_obj = inbound_objects.receive(inbound_object_timeout);
       if (!maybe_obj) {
         continue;
       }
@@ -213,15 +216,15 @@ operator==(const MLSClient::Epoch& lhs, const MLSClient::Epoch& rhs)
 MLSClient::Epoch
 MLSClient::next_epoch()
 {
-  return epochs.pop();
+  return epochs.receive().value();
 }
 
 MLSClient::Epoch
 MLSClient::latest_epoch()
 {
-  auto epoch = epochs.pop();
-  while (!epochs.empty()) {
-    epoch = epochs.pop();
+  auto epoch = epochs.receive().value();
+  while (!epochs.is_empty()) {
+    epoch = epochs.receive().value();
   }
   return epoch;
 }
@@ -233,10 +236,8 @@ MLSClient::subscribe(quicr::Namespace ns)
     return true;
   }
 
-  auto promise = std::promise<bool>();
-  auto future = promise.get_future();
   const auto delegate =
-    std::make_shared<SubDelegate>(logger, inbound_objects, std::move(promise));
+    std::make_shared<SubDelegate>(logger, inbound_objects.make_sender());
 
   logger->Log("Subscribe to " + std::string(ns));
   quicr::bytes empty;
@@ -248,7 +249,7 @@ MLSClient::subscribe(quicr::Namespace ns)
                     "bogus_auth_token",
                     std::move(empty));
 
-  const auto success = future.get();
+  const auto success = delegate->await_response();
   if (success) {
     sub_delegates.insert_or_assign(ns, delegate);
   }
@@ -376,7 +377,7 @@ MLSClient::handle(QuicrObject&& obj)
       }
 
       auto& session = std::get<MLSSession>(mls_session);
-      epochs.push({ session.get_state().epoch(),
+      epochs.send({ session.get_state().epoch(),
                     session.member_count(),
                     session.get_state().epoch_authenticator() });
 
@@ -561,7 +562,7 @@ MLSClient::advance(const bytes& commit)
   auto& session = std::get<MLSSession>(mls_session);
   switch (session.handle(commit)) {
     case MLSSession::HandleResult::ok:
-      epochs.push({ session.get_state().epoch(),
+      epochs.send({ session.get_state().epoch(),
                     session.member_count(),
                     session.get_state().epoch_authenticator() });
       logger->Log("Updated to epoch " +

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "async_queue.h"
+#include "channel.h"
 #include "epoch_server.h"
 #include "mls_session.h"
 #include "namespace_config.h"
@@ -83,7 +83,7 @@ private:
 
   std::map<uint64_t, std::map<uint32_t, size_t>> commit_votes;
   std::map<uint64_t, std::map<uint32_t, bytes>> commit_cache;
-  AsyncQueue<Epoch> epochs;
+  channel::Channel<Epoch> epochs;
 
   bool maybe_create_session();
 
@@ -105,7 +105,7 @@ private:
   };
 
   static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
-  std::shared_ptr<AsyncQueue<QuicrObject>> inbound_objects;
+  channel::Receiver<QuicrObject> inbound_objects;
   std::vector<QuicrObject> future_epoch_objects;
   std::optional<PendingCommit> pending_commit;
   std::optional<std::thread> handler_thread;

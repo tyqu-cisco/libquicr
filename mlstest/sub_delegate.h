@@ -1,11 +1,12 @@
 #pragma once
 
-#include "async_queue.h"
+#include "channel.h"
 
 #include <cantina/logger.h>
 #include <quicr/quicr_client_delegate.h>
 
 #include <future>
+#include <latch>
 
 class MLSClient;
 
@@ -19,8 +20,9 @@ class SubDelegate : public quicr::SubscriberDelegate
 {
 public:
   SubDelegate(cantina::LoggerPointer logger_in,
-              std::shared_ptr<AsyncQueue<QuicrObject>> queue_in,
-              std::promise<bool> on_response_in);
+              channel::Sender<QuicrObject>&& queue_in);
+
+  bool await_response() const;
 
   void onSubscribeResponse(const quicr::Namespace& quicr_namespace,
                            const quicr::SubscribeResult& result) override;
@@ -45,6 +47,7 @@ public:
 
 private:
   cantina::LoggerPointer logger;
-  std::shared_ptr<AsyncQueue<QuicrObject>> queue;
-  std::optional<std::promise<bool>> on_response;
+  channel::Sender<QuicrObject> queue;
+  std::latch response_latch{ 1 };
+  std::atomic_bool successfully_connected = false;
 };
