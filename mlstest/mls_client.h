@@ -1,7 +1,7 @@
 #pragma once
 
 #include "channel.h"
-#include "epoch_server.h"
+#include "epoch_sync.h"
 #include "mls_session.h"
 #include "namespace_config.h"
 #include "sub_delegate.h"
@@ -25,7 +25,7 @@ public:
     uint32_t user_id;
     cantina::LoggerPointer logger;
     quicr::RelayInfo relay;
-    std::shared_ptr<epoch::Server> epoch_server;
+    std::shared_ptr<epoch_sync::Service> epoch_server;
   };
 
   explicit MLSClient(const Config& config);
@@ -77,7 +77,7 @@ private:
     mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256
   };
 
-  std::shared_ptr<epoch::Server> epoch_server;
+  std::shared_ptr<epoch_sync::Service> epoch_server;
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
 

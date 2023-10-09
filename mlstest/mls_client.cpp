@@ -38,7 +38,7 @@ MLSClient::~MLSClient()
 bool
 MLSClient::maybe_create_session()
 {
-  using namespace epoch;
+  using namespace epoch_sync;
   static const auto invalid_tx_retry = std::chrono::milliseconds(100);
 
   // Get permission to create the group
@@ -445,7 +445,7 @@ MLSClient::defer(ParsedLeaveRequest&& leave)
 void
 MLSClient::make_commit()
 {
-  using namespace epoch;
+  using namespace epoch_sync;
 
   // Can't commit if we're not joined
   if (!joined()) {

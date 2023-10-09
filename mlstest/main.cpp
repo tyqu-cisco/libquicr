@@ -12,7 +12,7 @@ class MLSTest
 public:
   MLSTest()
     : logger(std::make_shared<cantina::Logger>(true))
-    , epoch_server(std::make_shared<epoch::InMemoryServer>())
+    , epoch_sync_service(std::make_shared<epoch_sync::InMemoryServer>())
   {
     // Connect to a relay
     const auto* relay_var = getenv("MLS_RELAY");
@@ -41,7 +41,7 @@ protected:
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
 
-  std::shared_ptr<epoch::Server> epoch_server;
+  std::shared_ptr<epoch_sync::Service> epoch_sync_service;
 
   static constexpr auto user_names = std::array<const char*, 5>{
     "Alice", "Bob", "Charlie", "Diana", "Ellen",
@@ -57,7 +57,7 @@ protected:
       .user_id = next_user_id,
       .logger = user_logger,
       .relay = relay,
-      .epoch_server = epoch_server,
+      .epoch_server = epoch_sync_service,
     };
 
     next_user_id += 1;

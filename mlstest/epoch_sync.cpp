@@ -1,8 +1,8 @@
-#include "epoch_server.h"
+#include "epoch_sync.h"
 
 #include <random>
 
-namespace epoch {
+namespace epoch_sync {
 
 using std::chrono::system_clock;
 
@@ -149,4 +149,4 @@ InMemoryServer::commit_complete(GroupID group_id,
   return commit_complete::OK{};
 }
 
-} // namespace epoch
+} // namespace epoch_sync

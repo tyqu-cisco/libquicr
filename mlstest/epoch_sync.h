@@ -5,7 +5,7 @@
 #include <mutex>
 #include <string>
 
-namespace epoch {
+namespace epoch_sync {
 
 using GroupID = uint64_t;
 using EpochID = uint64_t;
@@ -97,9 +97,9 @@ using Response =
   std::variant<UnknownGroup, InvalidEpoch, InvalidTransaction, OK>;
 } // namespace commit_complete
 
-struct Server
+struct Service
 {
-  virtual ~Server() = default;
+  virtual ~Service() = default;
 
   virtual create_init::Response create_init(GroupID group_id) = 0;
 
@@ -114,7 +114,7 @@ struct Server
                                                     TransactionID tx_id) = 0;
 };
 
-struct InMemoryServer : Server
+struct InMemoryServer : Service
 {
   static constexpr auto create_timeout = std::chrono::milliseconds(200);
   static constexpr auto commit_timeout = std::chrono::milliseconds(500);
@@ -152,4 +152,4 @@ private:
   TransactionID random_transaction_id() const;
 };
 
-} // namespace epoch
+} // namespace epoch_sync

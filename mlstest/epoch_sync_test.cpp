@@ -1,10 +1,10 @@
 #include <doctest/doctest.h>
 
-#include "epoch_server.h"
+#include "epoch_sync.h"
 
 #include <thread>
 
-using namespace epoch;
+using namespace epoch_sync;
 
 TEST_CASE("In-memory epoch server")
 {
