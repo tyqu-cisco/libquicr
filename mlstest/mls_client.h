@@ -97,13 +97,19 @@ private:
     std::vector<quicr::Name> welcome_names;
   };
 
-  static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
-  std::vector<delivery::Object> future_epoch_objects;
+  static constexpr auto inbound_timeout = std::chrono::milliseconds(100);
+  std::vector<delivery::Message> future_epoch_messages;
   std::optional<PendingCommit> pending_commit;
   std::optional<std::thread> handler_thread;
 
-  void handle(delivery::Object&& obj);
-  void advance(const bytes& commit);
+  bool current(const delivery::Message& message);
+
+  void handle(delivery::JoinRequest&& join_request);
+  void handle(delivery::Welcome&& welcome);
+  void handle(delivery::Commit&& commit);
+  void handle(delivery::LeaveRequest&& leave_request);
+  void handle_message(delivery::Message&& obj);
+  void advance(const mls::MLSMessage& commit);
   void groom_request_queues();
 
   // Commit thread

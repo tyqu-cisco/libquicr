@@ -4,6 +4,8 @@
 #include <mls/common.h>
 #include <mls/state.h>
 
+#include "delivery.h"
+
 #include <deque>
 #include <memory>
 
@@ -22,6 +24,7 @@ struct MLSInitInfo
 
 struct ParsedJoinRequest
 {
+  uint32_t join_id;
   uint32_t user_id;
   mls::KeyPackage key_package;
 };
@@ -40,24 +43,24 @@ public:
 
   // Join logic
   static std::optional<MLSSession> join(const MLSInitInfo& info,
-                                        const bytes& welcome_data);
-  static ParsedJoinRequest parse_join(const bytes& join_data);
+                                        const mls::Welcome& welcome);
+  static ParsedJoinRequest parse_join(delivery::JoinRequest&& join);
   bool obsolete(const ParsedJoinRequest& req) const;
 
   // Leave logic
-  bytes leave();
-  std::optional<ParsedLeaveRequest> parse_leave(const bytes& leave_data);
+  mls::MLSMessage leave();
+  std::optional<ParsedLeaveRequest> parse_leave(delivery::LeaveRequest&& leave);
   bool obsolete(const ParsedLeaveRequest& req) const;
 
   // Form a commit
-  std::tuple<bytes, bytes> commit(
+  std::tuple<mls::MLSMessage, mls::Welcome> commit(
     bool force_path,
     const std::vector<ParsedJoinRequest>& joins,
     const std::vector<ParsedLeaveRequest>& leaves);
 
   // Whether a given MLSMessage is for the current epoch
-  bool current(const bytes& message) const;
-  bool future(const bytes& message) const;
+  bool current(const mls::MLSMessage& message) const;
+  bool future(const mls::MLSMessage& message) const;
 
   // Measure the proximity of this member to a set of changes
   uint32_t distance_from(size_t n_adds,
@@ -88,7 +91,7 @@ public:
     future,
     removes_me,
   };
-  HandleResult handle(const bytes& commit_data);
+  HandleResult handle(const mls::MLSMessage& commit);
 
   // Access to the underlying MLS state
   mls::State& get_state();
@@ -107,7 +110,7 @@ private:
   mls::State& get_state(mls::epoch_t epoch);
 
   std::deque<mls::State> history;
-  std::optional<bytes> cached_commit;
+  std::optional<mls::MLSMessage> cached_commit;
   std::optional<mls::State> cached_next_state;
 
   static constexpr size_t max_history_depth = 10;

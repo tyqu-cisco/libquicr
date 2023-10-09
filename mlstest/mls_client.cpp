@@ -1,6 +1,4 @@
 #include "mls_client.h"
-#include "pub_delegate.h"
-#include "sub_delegate.h"
 
 #include <transport/transport.h>
 
@@ -80,14 +78,14 @@ MLSClient::connect()
   // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
     while (!stop_threads) {
-      auto maybe_obj = delivery_service->inbound_objects.receive(inbound_object_timeout);
-      if (!maybe_obj) {
+      auto maybe_msg = delivery_service->inbound_messages.receive(inbound_timeout);
+      if (!maybe_msg) {
         continue;
       }
 
       const auto _ = lock();
-      auto& obj = maybe_obj.value();
-      handle(std::move(obj));
+      auto& msg = maybe_msg.value();
+      handle_message(std::move(msg));
     }
 
     logger->Log("Handler thread stopping");
@@ -132,11 +130,10 @@ MLSClient::join()
 {
   const auto _ = lock();
   const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
-  // TODO(richbarn) Optimize out the need for the client to compute this ID
   const auto kp_id = NamespaceConfig::id_for(kp);
 
   join_promise = std::promise<bool>();
-  delivery_service->join_request(kp_id, tls::marshal(kp));
+  delivery_service->join_request(kp_id, kp);
 
   return join_promise->get_future();
 }
@@ -145,7 +142,7 @@ void
 MLSClient::leave()
 {
   auto self_remove = std::get<MLSSession>(mls_session).leave();
-  delivery_service->leave_request(std::move(self_remove));
+  delivery_service->leave_request(self_remove);
 
   // XXX(richbarn) It is important to disconnect here, before the Commit shows
   // up removing this client.  If we receive that Commit, we will crash with
@@ -189,149 +186,125 @@ MLSClient::latest_epoch()
   return epoch;
 }
 
-void
-MLSClient::handle(delivery::Object&& obj)
+bool
+MLSClient::current(const delivery::Message& message)
 {
-  const auto op = obj.op;
-  const auto sender = obj.sender;
-  const auto third_name_value = obj.third_name_value;
+  if (!joined()) {
+    return true;
+  }
 
+  auto& session = std::get<MLSSession>(mls_session);
+  const auto is_current = mls::overloaded{
+    [&](const delivery::Commit& commit) { return session.current(commit.commit); },
+    [&](const delivery::LeaveRequest& leave) { return session.current(leave.proposal); },
+    [](const auto& /* unused */) { return false; },
+  };
+
+  return var::visit(is_current, message);
+}
+
+void MLSClient::handle(delivery::JoinRequest&& join_request)
+{
+  logger->Log("Received JoinRequest");
+  auto parsed = MLSSession::parse_join(std::move(join_request));
+  joins_to_commit.push_back(defer(std::move(parsed)));
+  return;
+}
+
+void MLSClient::handle(delivery::Welcome&& welcome)
+{
+  logger->Log("Received Welcome");
+
+  if (joined()) {
+    logger->Log("Ignoring Welcome; already joined to the group");
+    return;
+  }
+
+  // Join the group
+  const auto& init_info = std::get<MLSInitInfo>(mls_session);
+  const auto maybe_mls_session = MLSSession::join(init_info, welcome.welcome);
+  if (!maybe_mls_session) {
+    logger->Log("Ignoring Welcome; not for me");
+    return;
+  }
+
+  mls_session = maybe_mls_session.value();
+  if (join_promise) {
+    join_promise->set_value(true);
+  }
+
+  auto& session = std::get<MLSSession>(mls_session);
+  epochs.send({ session.get_state().epoch(),
+                session.member_count(),
+                session.get_state().epoch_authenticator() });
+
+  // TODO(richbarn): Re-enable unsubscribing from welcome messages once
+  // joined.  Need to figure out how to do this within the DS framework.
+  //const auto welcome_ns = namespaces.welcome_sub();
+  //client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
+
+  // Request an empty commit to populate my path in the tree
+  const auto index = session.get_state().index();
+  old_leaf_node_to_commit =
+    session.get_state().tree().leaf_node(index).value();
+}
+
+void MLSClient::handle(delivery::Commit&& commit)
+{
+  logger->Log("Received Commit");
+
+  if (!joined()) {
+    logger->Log("Ignoring Commit; not joined to the group");
+    return;
+  }
+
+  advance(commit.commit);
+}
+
+void MLSClient::handle(delivery::LeaveRequest&& leave_request)
+{
+  logger->Log("Received LeaveRequest");
+
+  if (!joined()) {
+    logger->Log("Ignoring leave request; not joined to the group");
+    return;
+  }
+
+  auto& session = std::get<MLSSession>(mls_session);
+  auto maybe_parsed = session.parse_leave(std::move(leave_request));
+  if (!maybe_parsed) {
+    logger->Log("Ignoring leave request; unable to process");
+    return;
+  }
+
+  auto& parsed = maybe_parsed.value();
+  leaves_to_commit.push_back(defer(std::move(parsed)));
+}
+
+void
+MLSClient::handle_message(delivery::Message&& msg)
+{
   // Any MLSMesssage-formatted messages that are for a future epoch get
   // enqueued for later processing.
-  switch (op) {
-    case NamespaceConfig::Operation::leave:
-      [[fallthrough]];
-    case NamespaceConfig::Operation::commit:
-      [[fallthrough]];
-    case NamespaceConfig::Operation::commit_vote: {
-      const auto* session = std::get_if<MLSSession>(&mls_session);
-      if (!session || session->future(obj.data)) {
-        future_epoch_objects.push_back(std::move(obj));
-        return;
-      }
+  const auto* maybe_session = std::get_if<MLSSession>(&mls_session);
+  const auto is_future = mls::overloaded{
+    [&](const delivery::Commit& commit) {
+      return !maybe_session || maybe_session->future(commit.commit);
+    },
+    [&](const delivery::LeaveRequest& leave) {
+      return !maybe_session || maybe_session->future(leave.proposal);
+    },
+    [](const auto& /* other */) { return false; },
+  };
 
-      break;
-    }
-
-    case NamespaceConfig::Operation::key_package:
-      [[fallthrough]];
-    case NamespaceConfig::Operation::welcome: {
-      break;
-    }
-
-    default:
-      throw std::runtime_error("Illegal operation in name: " +
-                               std::to_string(op));
+  if (var::visit(is_future, msg)) {
+    future_epoch_messages.push_back(std::move(msg));
+    return;
   }
 
-  // Handle objects according to type
-  switch (op) {
-    case NamespaceConfig::Operation::key_package: {
-      logger->Log("Received Join, sender=" + std::to_string(sender));
-      auto parsed = MLSSession::parse_join(obj.data);
-      if (parsed.user_id != sender) {
-        logger->Log("Invalid join request; user ID mismatch");
-        return;
-      }
-
-      const auto kp_id = NamespaceConfig::id_for(parsed.key_package);
-      if (kp_id != third_name_value) {
-        logger->Log("Invalid join request; key package mismatch");
-        return;
-      }
-
-      joins_to_commit.push_back(defer(std::move(parsed)));
-      return;
-    }
-
-    case NamespaceConfig::Operation::leave: {
-      logger->Log("Received Leave, sender=" + std::to_string(sender));
-
-      if (!joined()) {
-        logger->Log("Ignoring leave request; not joined to the group");
-        return;
-      }
-
-      auto& session = std::get<MLSSession>(mls_session);
-      auto maybe_parsed = session.parse_leave(obj.data);
-      if (!maybe_parsed) {
-        logger->Log("Ignoring leave request; unable to process");
-        return;
-      }
-
-      auto& parsed = maybe_parsed.value();
-      if (parsed.user_id != sender) {
-        logger->Log("Ignoring leave request; user ID mismatch");
-      }
-
-      leaves_to_commit.push_back(defer(std::move(parsed)));
-      return;
-    }
-
-    case NamespaceConfig::Operation::welcome: {
-      logger->Log("Received Welcome");
-
-      if (joined()) {
-        logger->Log("Ignoring Welcome; already joined to the group");
-        return;
-      }
-
-      // Join the group
-      const auto& init_info = std::get<MLSInitInfo>(mls_session);
-      const auto maybe_mls_session = MLSSession::join(init_info, obj.data);
-      if (!maybe_mls_session) {
-        logger->Log("Ignoring Welcome; not for me");
-        return;
-      }
-
-      mls_session = maybe_mls_session.value();
-      if (join_promise) {
-        join_promise->set_value(true);
-      }
-
-      auto& session = std::get<MLSSession>(mls_session);
-      epochs.send({ session.get_state().epoch(),
-                    session.member_count(),
-                    session.get_state().epoch_authenticator() });
-
-      // TODO(richbarn): Re-enable unsubscribing from welcome messages once
-      // joined.  Need to figure out how to do this within the DS framework.
-      //const auto welcome_ns = namespaces.welcome_sub();
-      //client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
-
-      // Request an empty commit to populate my path in the tree
-      const auto index = session.get_state().index();
-      old_leaf_node_to_commit =
-        session.get_state().tree().leaf_node(index).value();
-
-      return;
-    }
-
-    case NamespaceConfig::Operation::commit: {
-      logger->Log("Received Commit");
-
-      if (!joined()) {
-        logger->Log("Ignoring Commit; not joined to the group");
-        return;
-      }
-
-      const auto epoch = uint64_t(third_name_value);
-      auto& session = std::get<MLSSession>(mls_session);
-      if (epoch != session.get_state().epoch()) {
-        logger->Log("Ignoring Commit that is not for the current epoch (" +
-                    std::to_string(epoch) +
-                    " != " + std::to_string(session.get_state().epoch()) + ")");
-        return;
-      }
-
-      advance(obj.data);
-      return;
-    }
-
-    default:
-      throw std::runtime_error("Illegal operation in name: " +
-                               std::to_string(op));
-  }
+  // Handle messages according to type
+  auto handle_dispatch = [this](auto&& msg) { handle(std::move(msg)); };
+  var::visit(handle_dispatch, std::move(msg));
 }
 
 MLSClient::TimePoint
@@ -435,7 +408,7 @@ MLSClient::make_commit()
   const auto tx_id = init_ok.transaction_id;
 
   // Publish the commit and update our own state
-  delivery_service->commit(epoch, commit);
+  delivery_service->commit(commit);
 
   // Inform the epoch server that the commit has been sent
   const auto complete_resp =
@@ -451,13 +424,12 @@ MLSClient::make_commit()
   advance(commit);
 
   for (const auto& join : joins) {
-    const auto kp_id = NamespaceConfig::id_for(join.key_package);
-    delivery_service->welcome(kp_id, welcome);
+    delivery_service->welcome(join.join_id, welcome);
   }
 }
 
 void
-MLSClient::advance(const bytes& commit)
+MLSClient::advance(const mls::MLSMessage& commit)
 {
   logger->Log("Attempting to advance the MLS state...");
 
@@ -497,16 +469,18 @@ MLSClient::advance(const bytes& commit)
   groom_request_queues();
 
   // Handle any out-of-order messages that have been enqueued
-  for (auto& obj : future_epoch_objects) {
-    if (!session.current(obj.data)) {
+  for (auto& msg : future_epoch_messages) {
+    if (!current(msg)) {
       continue;
     }
 
-    handle(std::move(obj));
+    // Copy here so that erase_if works properly below
+    auto msg_copy = msg;
+    handle_message(std::move(msg_copy));
   }
 
-  std::erase_if(future_epoch_objects,
-                [&](const auto& obj) { return session.current(obj.data); });
+  std::erase_if(future_epoch_messages,
+                [&](const auto& msg) { return current(msg); });
 }
 
 void

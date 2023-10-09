@@ -43,9 +43,8 @@ MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
 }
 
 std::optional<MLSSession>
-MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
+MLSSession::join(const MLSInitInfo& info, const mls::Welcome& welcome)
 {
-  const auto welcome = tls::get<mls::Welcome>(welcome_data);
   if (!welcome.find(info.key_package)) {
     return std::nullopt;
   }
@@ -61,11 +60,10 @@ MLSSession::join(const MLSInitInfo& info, const bytes& welcome_data)
 }
 
 ParsedJoinRequest
-MLSSession::parse_join(const bytes& join_data)
+MLSSession::parse_join(delivery::JoinRequest&& join)
 {
-  const auto key_package = tls::get<KeyPackage>(join_data);
-  const auto user_id = user_id_from_cred(key_package.leaf_node.credential);
-  return { user_id, key_package };
+  const auto user_id = user_id_from_cred(join.key_package.leaf_node.credential);
+  return { join.join_id, user_id, join.key_package };
 }
 
 bool
@@ -74,32 +72,29 @@ MLSSession::obsolete(const ParsedJoinRequest& req) const
   return !!leaf_for_user_id(req.user_id);
 }
 
-bytes
+mls::MLSMessage
 MLSSession::leave()
 {
+  // TODO(richbarn) Make sure this is sending an encrypted object
   const auto index = get_state().index();
-  const auto remove_proposal = get_state().remove(index, {});
-  return tls::marshal(remove_proposal);
+  return get_state().remove(index, {});
 }
 
 std::optional<ParsedLeaveRequest>
-MLSSession::parse_leave(const bytes& leave_data)
+MLSSession::parse_leave(delivery::LeaveRequest&& leave)
 {
   // Import the message
-  const auto leave_message = tls::get<MLSMessage>(leave_data);
-  const auto group_id = leave_message.group_id();
-  const auto epoch = leave_message.epoch();
-
+  const auto epoch = leave.proposal.epoch();
   if (!has_state(epoch)) {
     return std::nullopt;
   }
 
   auto mls_state = get_state(epoch);
-  if (leave_message.group_id() != mls_state.group_id()) {
+  if (leave.proposal.group_id() != mls_state.group_id()) {
     return std::nullopt;
   }
 
-  const auto leave_auth_content = mls_state.unwrap(leave_message);
+  const auto leave_auth_content = mls_state.unwrap(leave.proposal);
   const auto& leave_content = leave_auth_content.content;
   const auto& leave_sender = leave_content.sender.sender;
 
@@ -124,7 +119,7 @@ MLSSession::obsolete(const ParsedLeaveRequest& req) const
   return !leaf_for_user_id(req.user_id);
 }
 
-std::tuple<bytes, bytes>
+std::tuple<mls::MLSMessage, mls::Welcome>
 MLSSession::commit(bool force_path,
                    const std::vector<ParsedJoinRequest>& joins,
                    const std::vector<ParsedLeaveRequest>& leaves)
@@ -150,26 +145,21 @@ MLSSession::commit(bool force_path,
   const auto [commit, welcome, next_state] =
     mls_state.commit(fresh_secret(), commit_opts, message_opts);
 
-  const auto commit_data = tls::marshal(commit);
-  const auto welcome_data = tls::marshal(welcome);
-
-  cached_commit = commit_data;
+  cached_commit = commit;
   cached_next_state = std::move(next_state);
-  return std::make_tuple(commit_data, welcome_data);
+  return { commit, welcome };
 }
 
 bool
-MLSSession::current(const bytes& message_data) const
+MLSSession::current(const MLSMessage& message) const
 {
-  const auto epoch = tls::get<MLSMessage>(message_data).epoch();
-  return epoch == get_state().epoch();
+  return message.epoch() == get_state().epoch();
 }
 
 bool
-MLSSession::future(const bytes& message_data) const
+MLSSession::future(const MLSMessage& msage) const
 {
-  const auto epoch = tls::get<MLSMessage>(message_data).epoch();
-  return epoch > get_state().epoch();
+  return msage.epoch() > get_state().epoch();
 }
 
 static std::vector<LeafIndex>
@@ -243,9 +233,9 @@ MLSSession::unwrap_vote(const bytes& vote_data)
 }
 
 MLSSession::HandleResult
-MLSSession::handle(const bytes& commit_data)
+MLSSession::handle(const mls::MLSMessage& commit)
 {
-  if (commit_data == cached_commit) {
+  if (commit == cached_commit) {
     add_state(std::move(cached_next_state.value()));
     cached_commit.reset();
     cached_next_state.reset();
@@ -253,8 +243,7 @@ MLSSession::handle(const bytes& commit_data)
   }
 
   // The caller should assure that any handled commits are timely
-  const auto commit_message = tls::get<MLSMessage>(commit_data);
-  if (commit_message.epoch() != get_state().epoch()) {
+  if (commit.epoch() != get_state().epoch()) {
     return HandleResult::fail;
   }
 
@@ -265,7 +254,7 @@ MLSSession::handle(const bytes& commit_data)
   // be erased.  Instead we assume that any failure due to an invalid proposal
   // list is this type of failure
   try {
-    add_state(tls::opt::get(get_state().handle(commit_message)));
+    add_state(tls::opt::get(get_state().handle(commit)));
   } catch (const ProtocolError& exc) {
     if (std::string(exc.what()) == "Invalid proposal list") {
       return HandleResult::removes_me;
