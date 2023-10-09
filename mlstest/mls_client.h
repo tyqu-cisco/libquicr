@@ -1,10 +1,9 @@
 #pragma once
 
 #include "channel.h"
+#include "delivery.h"
 #include "epoch_sync.h"
 #include "mls_session.h"
-#include "namespace_config.h"
-#include "sub_delegate.h"
 
 #include <cantina/logger.h>
 #include <quicr/quicr_client.h>
@@ -24,8 +23,8 @@ public:
     uint64_t group_id;
     uint32_t user_id;
     cantina::LoggerPointer logger;
-    quicr::RelayInfo relay;
-    std::shared_ptr<epoch_sync::Service> epoch_server;
+    std::shared_ptr<epoch_sync::Service> epoch_sync_service;
+    std::shared_ptr<delivery::Service> delivery_service;
   };
 
   explicit MLSClient(const Config& config);
@@ -63,21 +62,15 @@ private:
   // Pub/Sub operations
   uint64_t group_id;
   uint32_t user_id;
-  NamespaceConfig namespaces;
-
-  std::unique_ptr<quicr::Client> client;
-  std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
-
-  bool subscribe(quicr::Namespace nspace);
-  bool publish_intent(quicr::Namespace nspace);
-  void publish(const quicr::Name& name, bytes&& data);
 
   // MLS operations
   const mls::CipherSuite suite{
     mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256
   };
 
-  std::shared_ptr<epoch_sync::Service> epoch_server;
+  std::shared_ptr<epoch_sync::Service> epoch_sync_service;
+  std::shared_ptr<delivery::Service> delivery_service;
+
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
 
@@ -105,12 +98,11 @@ private:
   };
 
   static constexpr auto inbound_object_timeout = std::chrono::milliseconds(100);
-  channel::Receiver<QuicrObject> inbound_objects;
-  std::vector<QuicrObject> future_epoch_objects;
+  std::vector<delivery::Object> future_epoch_objects;
   std::optional<PendingCommit> pending_commit;
   std::optional<std::thread> handler_thread;
 
-  void handle(QuicrObject&& obj);
+  void handle(delivery::Object&& obj);
   void advance(const bytes& commit);
   void groom_request_queues();
 

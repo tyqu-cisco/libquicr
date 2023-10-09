@@ -8,27 +8,16 @@ using namespace mls;
 using namespace std::chrono_literals;
 
 static const size_t epochs_capacity = 100;
-static const size_t inbound_objects_capacity = 1000;
-static const uint16_t default_ttl_ms = 1000;
 
 MLSClient::MLSClient(const Config& config)
   : logger(config.logger)
   , group_id(config.group_id)
   , user_id(config.user_id)
-  , namespaces(NamespaceConfig(group_id))
-  , epoch_server(config.epoch_server)
+  , epoch_sync_service(config.epoch_sync_service)
+  , delivery_service(config.delivery_service)
   , mls_session(MLSInitInfo{ suite, user_id })
   , epochs(epochs_capacity)
-  , inbound_objects(inbound_objects_capacity)
-{
-  // Set up Quicr relay connection
-  logger->Log("Connecting to " + config.relay.hostname + ":" +
-              std::to_string(config.relay.port));
-
-  qtransport::TransportConfig tcfg{ .tls_cert_filename = NULL,
-                                    .tls_key_filename = NULL };
-  client = std::make_unique<quicr::Client>(config.relay, tcfg, logger);
-}
+{}
 
 MLSClient::~MLSClient()
 {
@@ -42,7 +31,7 @@ MLSClient::maybe_create_session()
   static const auto invalid_tx_retry = std::chrono::milliseconds(100);
 
   // Get permission to create the group
-  const auto init_resp = epoch_server->create_init(group_id);
+  const auto init_resp = epoch_sync_service->create_init(group_id);
   if (std::holds_alternative<create_init::Created>(init_resp)) {
     return false;
   }
@@ -61,7 +50,7 @@ MLSClient::maybe_create_session()
   const auto session = MLSSession::create(init_info, group_id);
 
   // Report that the group has been created
-  const auto complete_resp = epoch_server->create_complete(group_id, tx_id);
+  const auto complete_resp = epoch_sync_service->create_complete(group_id, tx_id);
   if (std::holds_alternative<create_complete::Created>(complete_resp)) {
     return false;
   }
@@ -80,44 +69,18 @@ MLSClient::maybe_create_session()
 bool
 MLSClient::connect()
 {
-  // Connect to the quicr relay
-  if (!client->connect()) {
-    return false;
-  }
-
   // Determine whether to create the group
-  auto created_session = maybe_create_session();
+  auto as_creator = maybe_create_session();
 
-  // XXX(richbarn) These subscriptions / publishes are done serially; we await a
-  // response for each one before doing the next.  They could be done in
-  // parallel by having subscribe/publish_intent return std::future<bool> and
-  // awaiting all of these futures together.
-
-  // Subscribe to the required namespaces
-  auto success = true;
-  success = success && subscribe(namespaces.key_package_sub());
-  if (!created_session) {
-    success = success && subscribe(namespaces.welcome_sub());
-  }
-  success = success && subscribe(namespaces.commit_sub());
-  success = success && subscribe(namespaces.leave_sub());
-  success = success && subscribe(namespaces.commit_vote_sub());
-
-  // Announce intent to publish on this user's namespaces
-  success = success && publish_intent(namespaces.key_package_pub(user_id));
-  success = success && publish_intent(namespaces.welcome_pub(user_id));
-  success = success && publish_intent(namespaces.commit_pub(user_id));
-  success = success && publish_intent(namespaces.leave_pub(user_id));
-  success = success && publish_intent(namespaces.commit_vote_pub(user_id));
-
-  if (!success) {
+  // Connect to the delivery service
+  if (!delivery_service->connect(as_creator)) {
     return false;
   }
 
   // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
     while (!stop_threads) {
-      auto maybe_obj = inbound_objects.receive(inbound_object_timeout);
+      auto maybe_obj = delivery_service->inbound_objects.receive(inbound_object_timeout);
       if (!maybe_obj) {
         continue;
       }
@@ -146,8 +109,8 @@ MLSClient::connect()
 void
 MLSClient::disconnect()
 {
-  logger->Log("Disconnecting QuicR client");
-  client->disconnect();
+  logger->Log("Disconnecting delivery service");
+  delivery_service->disconnect();
 
   stop_threads = true;
 
@@ -169,23 +132,20 @@ MLSClient::join()
 {
   const auto _ = lock();
   const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
+  // TODO(richbarn) Optimize out the need for the client to compute this ID
   const auto kp_id = NamespaceConfig::id_for(kp);
-  const auto name = namespaces.for_key_package(user_id, kp_id);
 
   join_promise = std::promise<bool>();
-  auto join_future = join_promise->get_future();
+  delivery_service->join_request(kp_id, tls::marshal(kp));
 
-  publish(name, tls::marshal(kp));
-
-  return join_future;
+  return join_promise->get_future();
 }
 
 void
 MLSClient::leave()
 {
   auto self_remove = std::get<MLSSession>(mls_session).leave();
-  const auto name = namespaces.for_leave(user_id);
-  publish(name, std::move(self_remove));
+  delivery_service->leave_request(std::move(self_remove));
 
   // XXX(richbarn) It is important to disconnect here, before the Commit shows
   // up removing this client.  If we receive that Commit, we will crash with
@@ -229,59 +189,12 @@ MLSClient::latest_epoch()
   return epoch;
 }
 
-bool
-MLSClient::subscribe(quicr::Namespace ns)
-{
-  if (sub_delegates.count(ns)) {
-    return true;
-  }
-
-  const auto delegate =
-    std::make_shared<SubDelegate>(logger, inbound_objects.make_sender());
-
-  logger->Log("Subscribe to " + std::string(ns));
-  quicr::bytes empty;
-  client->subscribe(delegate,
-                    ns,
-                    quicr::SubscribeIntent::immediate,
-                    "bogus_origin_url",
-                    false,
-                    "bogus_auth_token",
-                    std::move(empty));
-
-  const auto success = delegate->await_response();
-  if (success) {
-    sub_delegates.insert_or_assign(ns, delegate);
-  }
-
-  return success;
-}
-
-bool
-MLSClient::publish_intent(quicr::Namespace ns)
-{
-  logger->Log("Publish Intent for namespace: " + std::string(ns));
-  auto promise = std::promise<bool>();
-  auto future = promise.get_future();
-  const auto delegate =
-    std::make_shared<PubDelegate>(logger, std::move(promise));
-
-  client->publishIntent(delegate, ns, {}, {}, {});
-  return future.get();
-}
-
 void
-MLSClient::publish(const quicr::Name& name, bytes&& data)
+MLSClient::handle(delivery::Object&& obj)
 {
-  logger->Log("Publish, name=" + std::string(name) +
-              " size=" + std::to_string(data.size()));
-  client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
-}
-
-void
-MLSClient::handle(QuicrObject&& obj)
-{
-  const auto [op, sender, third_name_value] = namespaces.parse(obj.name);
+  const auto op = obj.op;
+  const auto sender = obj.sender;
+  const auto third_name_value = obj.third_name_value;
 
   // Any MLSMesssage-formatted messages that are for a future epoch get
   // enqueued for later processing.
@@ -381,8 +294,10 @@ MLSClient::handle(QuicrObject&& obj)
                     session.member_count(),
                     session.get_state().epoch_authenticator() });
 
-      const auto welcome_ns = namespaces.welcome_sub();
-      client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
+      // TODO(richbarn): Re-enable unsubscribing from welcome messages once
+      // joined.  Need to figure out how to do this within the DS framework.
+      //const auto welcome_ns = namespaces.welcome_sub();
+      //client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
 
       // Request an empty commit to populate my path in the tree
       const auto index = session.get_state().index();
@@ -480,16 +395,6 @@ MLSClient::make_commit()
     }
   }
 
-  // Compute the set of names to send a welcome to (if any)
-  auto welcome_names = std::vector<quicr::Name>{};
-  std::transform(joins.begin(),
-                 joins.end(),
-                 std::back_inserter(welcome_names),
-                 [&](const auto& join) {
-                   const auto kp_id = NamespaceConfig::id_for(join.key_package);
-                   return namespaces.for_welcome(user_id, kp_id);
-                 });
-
   // Abort if nothing to commit
   if (!self_update && joins.empty() && leaves.empty()) {
     logger->Log("Not committing; nothing to commit");
@@ -510,7 +415,7 @@ MLSClient::make_commit()
 
   // Get permission to send a commit
   const auto epoch = session.get_state().epoch();
-  const auto init_resp = epoch_server->commit_init(group_id, epoch);
+  const auto init_resp = epoch_sync_service->commit_init(group_id, epoch);
   if (std::holds_alternative<commit_init::InvalidEpoch>(init_resp)) {
     const auto server_epoch =
       std::get<commit_init::InvalidEpoch>(init_resp).current_epoch;
@@ -530,13 +435,11 @@ MLSClient::make_commit()
   const auto tx_id = init_ok.transaction_id;
 
   // Publish the commit and update our own state
-  const auto commit_name = namespaces.for_commit(user_id, epoch);
-  auto commit_copy = commit;
-  publish(commit_name, std::move(commit_copy));
+  delivery_service->commit(epoch, commit);
 
   // Inform the epoch server that the commit has been sent
   const auto complete_resp =
-    epoch_server->commit_complete(group_id, epoch, tx_id);
+    epoch_sync_service->commit_complete(group_id, epoch, tx_id);
   if (!std::holds_alternative<commit_complete::OK>(complete_resp)) {
     // Something went wrong, abort and hope everyone ignores the commit
     logger->info << "Failed to complete commit code=" << complete_resp.index()
@@ -547,9 +450,9 @@ MLSClient::make_commit()
   // Publish the Welcome and update our own state now that everything is OK
   advance(commit);
 
-  for (const auto& name : welcome_names) {
-    auto welcome_copy = welcome;
-    publish(name, std::move(welcome));
+  for (const auto& join : joins) {
+    const auto kp_id = NamespaceConfig::id_for(join.key_package);
+    delivery_service->welcome(kp_id, welcome);
   }
 }
 

@@ -3,6 +3,8 @@
 
 #include "mls_client.h"
 
+#include <transport/transport.h>
+
 #include <random>
 #include <thread>
 using namespace std::chrono_literals;
@@ -37,9 +39,12 @@ public:
 protected:
   const cantina::LoggerPointer logger;
   quicr::RelayInfo relay;
+  qtransport::TransportConfig tcfg{ .tls_cert_filename = NULL,
+                                        .tls_key_filename = NULL };
 
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
+  size_t message_queue_capacity = 10;
 
   std::shared_ptr<epoch_sync::Service> epoch_sync_service;
 
@@ -52,12 +57,20 @@ protected:
     const auto* user_name = user_names.at(next_user_id);
     const auto user_logger =
       std::make_shared<cantina::Logger>(user_name, logger, true);
+
+    const auto client = std::make_shared<quicr::Client>(relay, tcfg, logger);
+    const auto delivery_service = std::make_shared<delivery::QuicrService>(message_queue_capacity,
+               user_logger,
+               client,
+               group_id,
+               next_user_id);
+
     const auto config = MLSClient::Config{
       .group_id = group_id,
       .user_id = next_user_id,
       .logger = user_logger,
-      .relay = relay,
-      .epoch_server = epoch_sync_service,
+      .epoch_sync_service = epoch_sync_service,
+      .delivery_service = delivery_service,
     };
 
     next_user_id += 1;
