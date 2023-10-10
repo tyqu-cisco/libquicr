@@ -166,13 +166,11 @@ QuicrService::connect(bool as_creator)
     && (as_creator || subscribe(namespaces.welcome_sub()))
     && subscribe(namespaces.commit_sub())
     && subscribe(namespaces.leave_sub())
-    && subscribe(namespaces.commit_vote_sub())
     // Announce intent to publish on this user's namespaces
     && publish_intent(namespaces.key_package_pub(user_id))
     && publish_intent(namespaces.welcome_pub(user_id))
     && publish_intent(namespaces.commit_pub(user_id))
-    && publish_intent(namespaces.leave_pub(user_id))
-    && publish_intent(namespaces.commit_vote_pub(user_id));
+    && publish_intent(namespaces.leave_pub(user_id));
 }
 
 void

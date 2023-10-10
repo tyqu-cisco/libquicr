@@ -66,22 +66,6 @@ public:
   uint32_t distance_from(size_t n_adds,
                          const std::vector<ParsedLeaveRequest>& leaves) const;
 
-  // Vote handling
-  enum struct VoteType : uint8_t
-  {
-    commit = 0x01,
-  };
-  struct Vote
-  {
-    VoteType type;
-    uint64_t id;
-    uint32_t vote;
-
-    TLS_SERIALIZABLE(type, id, vote);
-  };
-  bytes wrap_vote(const Vote& vote);
-  Vote unwrap_vote(const bytes& vote_data);
-
   // Commit handling
   enum struct HandleResult : uint8_t
   {

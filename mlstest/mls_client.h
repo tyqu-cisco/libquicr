@@ -74,8 +74,6 @@ private:
   std::optional<std::promise<bool>> join_promise;
   std::variant<MLSInitInfo, MLSSession> mls_session;
 
-  std::map<uint64_t, std::map<uint32_t, size_t>> commit_votes;
-  std::map<uint64_t, std::map<uint32_t, bytes>> commit_cache;
   channel::Channel<Epoch> epochs;
 
   bool maybe_create_session();
@@ -90,16 +88,8 @@ private:
   std::atomic_bool stop_threads = false;
 
   // Handler thread, including out-of-order message handling
-  struct PendingCommit
-  {
-    bytes commit;
-    bytes welcome;
-    std::vector<quicr::Name> welcome_names;
-  };
-
   static constexpr auto inbound_timeout = std::chrono::milliseconds(100);
   std::vector<delivery::Message> future_epoch_messages;
-  std::optional<PendingCommit> pending_commit;
   std::optional<std::thread> handler_thread;
 
   bool current(const delivery::Message& message);

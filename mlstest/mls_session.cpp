@@ -216,22 +216,6 @@ MLSSession::distance_from(size_t n_adds,
   return total_distance(mls_state.index(), affected);
 }
 
-bytes
-MLSSession::wrap_vote(const Vote& vote)
-{
-  const auto vote_data = tls::marshal(vote);
-  const auto message = get_state().protect({}, vote_data, 0);
-  return tls::marshal(message);
-}
-
-MLSSession::Vote
-MLSSession::unwrap_vote(const bytes& vote_data)
-{
-  const auto message = tls::get<MLSMessage>(vote_data);
-  const auto [_aad, pt] = get_state(message.epoch()).unprotect(message);
-  return tls::get<Vote>(pt);
-}
-
 MLSSession::HandleResult
 MLSSession::handle(const mls::MLSMessage& commit)
 {

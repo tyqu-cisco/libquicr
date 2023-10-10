@@ -51,7 +51,6 @@ NamespaceConfig::NamespaceConfig(uint64_t group_id)
   welcome_base = base.extend(Operation::welcome, op_bits);
   commit_base = base.extend(Operation::commit, op_bits);
   leave_base = base.extend(Operation::leave, op_bits);
-  commit_vote_base = base.extend(Operation::commit_vote, op_bits);
 }
 
 Namespace
@@ -79,12 +78,6 @@ NamespaceConfig::leave_sub() const
 }
 
 Namespace
-NamespaceConfig::commit_vote_sub() const
-{
-  return commit_vote_base;
-}
-
-Namespace
 NamespaceConfig::key_package_pub(uint32_t sender) const
 {
   return key_package_base.extend(sender, sender_bits);
@@ -106,12 +99,6 @@ Namespace
 NamespaceConfig::leave_pub(uint32_t sender) const
 {
   return leave_base.extend(sender, sender_bits);
-}
-
-Namespace
-NamespaceConfig::commit_vote_pub(uint32_t sender) const
-{
-  return commit_vote_base.extend(sender, sender_bits);
 }
 
 uint32_t
@@ -148,14 +135,6 @@ Name
 NamespaceConfig::for_leave(uint32_t sender) const
 {
   return leave_base.extend(sender, sender_bits).ns.name();
-}
-
-Name
-NamespaceConfig::for_commit_vote(uint32_t sender, uint64_t epoch) const
-{
-  return commit_vote_base.extend(sender, sender_bits)
-    .extend(epoch, epoch_bits)
-    .ns.name();
 }
 
 std::tuple<NamespaceConfig::Operation::Type, uint32_t, uint32_t>

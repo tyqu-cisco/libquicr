@@ -342,11 +342,6 @@ MLSClient::make_commit()
 
   auto& session = std::get<MLSSession>(mls_session);
 
-  // Don't create more than one commit per epoch
-  if (pending_commit) {
-    return;
-  }
-
   // Import the requests
   groom_request_queues();
 
