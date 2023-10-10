@@ -75,9 +75,8 @@ MLSSession::obsolete(const ParsedJoinRequest& req) const
 mls::MLSMessage
 MLSSession::leave()
 {
-  // TODO(richbarn) Make sure this is sending an encrypted object
   const auto index = get_state().index();
-  return get_state().remove(index, {});
+  return get_state().remove(index, message_opts);
 }
 
 std::optional<ParsedLeaveRequest>
@@ -192,16 +191,6 @@ uint32_t
 MLSSession::distance_from(size_t n_adds,
                           const std::vector<ParsedLeaveRequest>& leaves) const
 {
-  // A node should commit if:
-  //
-  // * It has the lowest total topological distance to the changes among all
-  //   non-blank leaf nodes.
-  // * No node to its left has the same topological distance.
-  //
-  // We compute this in one pass through the leaves of the tree by computing the
-  // total topological distance at each leaf node and updating only if the
-  // distance is lowest than the lowest known.
-
   auto& mls_state = get_state();
   auto removed = std::set<mls::LeafIndex>{};
   std::transform(

@@ -7,7 +7,8 @@
 // Each group has two namespaces:
 //
 // 1. A Welcome namespace, to which joiners subscribe and Welcomes are sent
-// 2. A group namespace, to which everyone subscribes and everything else is sent
+// 2. A group namespace, to which everyone subscribes and everything else is
+// sent
 //
 // Each sender allocates a 24-bit sub-namespace underneath these namespaces,
 // based on their endpoint ID.  The sender then sets the low-order bits to

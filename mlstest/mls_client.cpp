@@ -15,7 +15,8 @@ MLSClient::MLSClient(const Config& config)
   , delivery_service(config.delivery_service)
   , mls_session(MLSInitInfo{ suite, user_id })
   , epochs(epochs_capacity)
-{}
+{
+}
 
 MLSClient::~MLSClient()
 {
@@ -48,7 +49,8 @@ MLSClient::maybe_create_session()
   const auto session = MLSSession::create(init_info, group_id);
 
   // Report that the group has been created
-  const auto complete_resp = epoch_sync_service->create_complete(group_id, tx_id);
+  const auto complete_resp =
+    epoch_sync_service->create_complete(group_id, tx_id);
   if (std::holds_alternative<create_complete::Created>(complete_resp)) {
     return false;
   }
@@ -78,7 +80,8 @@ MLSClient::connect()
   // Start up a thread to handle incoming messages
   handler_thread = std::thread([&]() {
     while (!stop_threads) {
-      auto maybe_msg = delivery_service->inbound_messages.receive(inbound_timeout);
+      auto maybe_msg =
+        delivery_service->inbound_messages.receive(inbound_timeout);
       if (!maybe_msg) {
         continue;
       }
@@ -132,7 +135,7 @@ MLSClient::join()
   join_promise = std::promise<bool>();
 
   const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
-  delivery_service->join_request(kp);
+  delivery_service->send(delivery::JoinRequest{ kp });
 
   return join_promise->get_future();
 }
@@ -141,7 +144,7 @@ void
 MLSClient::leave()
 {
   auto self_remove = std::get<MLSSession>(mls_session).leave();
-  delivery_service->leave_request(self_remove);
+  delivery_service->send(delivery::LeaveRequest{ self_remove });
 
   // XXX(richbarn) It is important to disconnect here, before the Commit shows
   // up removing this client.  If we receive that Commit, we will crash with
@@ -194,15 +197,20 @@ MLSClient::current(const delivery::Message& message)
 
   auto& session = std::get<MLSSession>(mls_session);
   const auto is_current = mls::overloaded{
-    [&](const delivery::Commit& commit) { return session.current(commit.commit); },
-    [&](const delivery::LeaveRequest& leave) { return session.current(leave.proposal); },
+    [&](const delivery::Commit& commit) {
+      return session.current(commit.commit);
+    },
+    [&](const delivery::LeaveRequest& leave) {
+      return session.current(leave.proposal);
+    },
     [](const auto& /* unused */) { return false; },
   };
 
   return var::visit(is_current, message);
 }
 
-void MLSClient::handle(delivery::JoinRequest&& join_request)
+void
+MLSClient::handle(delivery::JoinRequest&& join_request)
 {
   logger->Log("Received JoinRequest");
   auto parsed = MLSSession::parse_join(std::move(join_request));
@@ -210,7 +218,8 @@ void MLSClient::handle(delivery::JoinRequest&& join_request)
   return;
 }
 
-void MLSClient::handle(delivery::Welcome&& welcome)
+void
+MLSClient::handle(delivery::Welcome&& welcome)
 {
   logger->Log("Received Welcome");
 
@@ -233,22 +242,21 @@ void MLSClient::handle(delivery::Welcome&& welcome)
   }
 
   auto& session = std::get<MLSSession>(mls_session);
-  epochs.send({ session.get_state().epoch(),
+  epochs.send({ session.epoch(),
                 session.member_count(),
-                session.get_state().epoch_authenticator() });
+                session.epoch_authenticator() });
 
   // TODO(richbarn): Re-enable unsubscribing from welcome messages once
   // joined.  Need to figure out how to do this within the DS framework.
-  //const auto welcome_ns = namespaces.welcome_sub();
-  //client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
+  // const auto welcome_ns = namespaces.welcome_sub();
+  // client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
 
   // Request an empty commit to populate my path in the tree
-  const auto index = session.get_state().index();
-  old_leaf_node_to_commit =
-    session.get_state().tree().leaf_node(index).value();
+  self_update_to_commit = true;
 }
 
-void MLSClient::handle(delivery::Commit&& commit)
+void
+MLSClient::handle(delivery::Commit&& commit)
 {
   logger->Log("Received Commit");
 
@@ -260,7 +268,8 @@ void MLSClient::handle(delivery::Commit&& commit)
   advance(commit.commit);
 }
 
-void MLSClient::handle(delivery::LeaveRequest&& leave_request)
+void
+MLSClient::handle(delivery::LeaveRequest&& leave_request)
 {
   logger->Log("Received LeaveRequest");
 
@@ -345,7 +354,7 @@ MLSClient::make_commit()
   groom_request_queues();
 
   // Select the requests for which a commit is timely
-  const auto self_update = old_leaf_node_to_commit.has_value();
+  const auto self_update = self_update_to_commit.load();
 
   const auto now = std::chrono::system_clock::now();
   auto joins = std::vector<ParsedJoinRequest>{};
@@ -381,7 +390,7 @@ MLSClient::make_commit()
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
   // Get permission to send a commit
-  const auto epoch = session.get_state().epoch();
+  const auto epoch = session.epoch();
   const auto init_resp = epoch_sync_service->commit_init(group_id, epoch);
   if (std::holds_alternative<commit_init::InvalidEpoch>(init_resp)) {
     const auto server_epoch =
@@ -402,7 +411,7 @@ MLSClient::make_commit()
   const auto tx_id = init_ok.transaction_id;
 
   // Publish the commit and update our own state
-  delivery_service->commit(commit);
+  delivery_service->send(delivery::Commit{ commit });
 
   // Inform the epoch server that the commit has been sent
   const auto complete_resp =
@@ -416,11 +425,12 @@ MLSClient::make_commit()
 
   // Publish the Welcome and update our own state now that everything is OK
   advance(commit);
+  self_update_to_commit = false;
 
   // Note: While it may seem harmless to send a Welcome if there are no joins,
   // omitting this `if` guard causes one of the tests to hang.
   if (!joins.empty()) {
-    delivery_service->welcome(welcome);
+    delivery_service->send(delivery::Welcome{ welcome });
   }
 }
 
@@ -433,23 +443,15 @@ MLSClient::advance(const mls::MLSMessage& commit)
   auto& session = std::get<MLSSession>(mls_session);
   switch (session.handle(commit)) {
     case MLSSession::HandleResult::ok:
-      epochs.send({ session.get_state().epoch(),
+      epochs.send({ session.epoch(),
                     session.member_count(),
-                    session.get_state().epoch_authenticator() });
+                    session.epoch_authenticator() });
       logger->Log("Updated to epoch " +
-                  std::to_string(session.get_state().epoch()));
+                  std::to_string(session.epoch()));
       break;
 
     case MLSSession::HandleResult::fail:
       logger->Log("Failed to advance; unspecified failure");
-      break;
-
-    case MLSSession::HandleResult::stale:
-      logger->Log("Failed to advance; stale commit");
-      break;
-
-    case MLSSession::HandleResult::future:
-      logger->Log("Failed to advance; future commit");
       break;
 
     case MLSSession::HandleResult::removes_me:
@@ -489,12 +491,4 @@ MLSClient::groom_request_queues()
 
   std::erase_if(joins_to_commit, obsolete);
   std::erase_if(leaves_to_commit, obsolete);
-
-  if (old_leaf_node_to_commit) {
-    // A self-update request is obsolete if the old leaf node no longer appears
-    const auto& leaf = old_leaf_node_to_commit.value();
-    if (!session.get_state().tree().find(leaf)) {
-      old_leaf_node_to_commit.reset();
-    }
-  }
 }

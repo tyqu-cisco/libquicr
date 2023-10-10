@@ -1,8 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "namespace_config.h"
 #include "mls_client.h"
+#include "namespace_config.h"
 
 #include <transport/transport.h>
 
@@ -44,7 +44,7 @@ protected:
   const cantina::LoggerPointer logger;
   quicr::RelayInfo relay;
   qtransport::TransportConfig tcfg{ .tls_cert_filename = NULL,
-                                        .tls_key_filename = NULL };
+                                    .tls_key_filename = NULL };
 
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
@@ -65,12 +65,13 @@ protected:
       std::make_shared<cantina::Logger>(user_name, logger, true);
 
     const auto client = std::make_shared<quicr::Client>(relay, tcfg, logger);
-    const auto delivery_service = std::make_shared<delivery::QuicrService>(message_queue_capacity,
-               user_logger,
-               client,
-               welcome_ns,
-               group_ns,
-               next_user_id);
+    const auto delivery_service =
+      std::make_shared<delivery::QuicrService>(message_queue_capacity,
+                                               user_logger,
+                                               client,
+                                               welcome_ns,
+                                               group_ns,
+                                               next_user_id);
 
     const auto config = MLSClient::Config{
       .group_id = group_id,

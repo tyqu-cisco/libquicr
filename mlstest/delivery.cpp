@@ -1,4 +1,5 @@
 #include "delivery.h"
+#include "null_delegate.h"
 
 #include <quicr/quicr_client_delegate.h>
 
@@ -8,10 +9,12 @@ namespace delivery {
 
 Service::Service(size_t capacity)
   : inbound_messages(capacity)
-{}
+{
+}
 
 // Encoding / decoding for Quicr transport
-enum struct MessageType : uint8_t {
+enum struct MessageType : uint8_t
+{
   invalid = 0,
   join_request = 1,
   welcome = 2,
@@ -19,23 +22,16 @@ enum struct MessageType : uint8_t {
   leave_request = 4,
 };
 
-struct QuicrMessage {
+struct QuicrMessage
+{
   Message message;
 
   TLS_SERIALIZABLE(message)
   TLS_TRAITS(tls::variant<MessageType>)
 };
 
-static bytes encode(const Message& message) {
-  return tls::marshal(QuicrMessage{ message });
-}
-
-static Message decode(const bytes& data) {
-  return tls::get<QuicrMessage>(data).message;
-}
-
 // QuicrService::SubDelegate
-struct QuicrService::SubDelegate : public quicr::SubscriberDelegate
+struct QuicrService::SubDelegate : NullSubscribeDelegate
 {
 public:
   SubDelegate(cantina::LoggerPointer logger_in,
@@ -44,9 +40,11 @@ public:
     : logger(logger_in)
     , namespaces(namespaces_in)
     , queue(queue_in)
-  {}
+  {
+  }
 
-  bool await_response() const {
+  bool await_response() const
+  {
     response_latch.wait();
     return successfully_connected;
   }
@@ -55,26 +53,20 @@ public:
                            const quicr::SubscribeResult& result) override
   {
     logger->info << "onSubscriptionResponse: ns: " << quicr_namespace
-                 << " status: " << static_cast<int>(result.status) << std::flush;
+                 << " status: " << static_cast<int>(result.status)
+                 << std::flush;
 
-    successfully_connected = result.status ==
-                             quicr::SubscribeResult::SubscribeStatus::Ok;
+    successfully_connected =
+      result.status == quicr::SubscribeResult::SubscribeStatus::Ok;
     response_latch.count_down();
-  }
-
-  void onSubscriptionEnded(
-    const quicr::Namespace& quicr_namespace,
-    const quicr::SubscribeResult::SubscribeStatus& reason) override
-  {
-    logger->info << "onSubscriptionEnded: ns: " << quicr_namespace
-                 << " reason: " << static_cast<int>(reason) << std::flush;
   }
 
   void onSubscribedObject(const quicr::Name& quicr_name,
                           uint8_t /* priority */,
                           uint16_t /* expiry_age_ms */,
                           bool /* use_reliable_transport */,
-                          quicr::bytes&& data) override {
+                          quicr::bytes&& data) override
+  {
     logger->info << "recv object: name: " << quicr_name
                  << " data sz: " << data.size();
 
@@ -85,18 +77,9 @@ public:
     }
 
     logger->info << std::flush;
-    queue.send(decode(data));
-  }
 
-  void onSubscribedObjectFragment(const quicr::Name& quicr_name,
-                          uint8_t /* priority */,
-                          uint16_t /* expiry_age_ms */,
-                          bool /* use_reliable_transport */,
-                                  const uint64_t& /* offset */,
-                                  bool /* is_last_fragment */,
-                                  quicr::bytes&& /* data */) override {
-    logger->info << "Ignoring object fragment received for " << quicr_name
-                 << std::flush;
+    auto decoded = tls::get<QuicrMessage>(data).message;
+    queue.send(std::move(decoded));
   }
 
 private:
@@ -108,14 +91,16 @@ private:
 };
 
 // QuicrService::PubDelegate
-struct QuicrService::PubDelegate : public quicr::PublisherDelegate
+struct QuicrService::PubDelegate : quicr::PublisherDelegate
 {
 public:
   PubDelegate(cantina::LoggerPointer logger_in)
     : logger(std::move(logger_in))
-  {}
+  {
+  }
 
-  bool await_response() const {
+  bool await_response() const
+  {
     response_latch.wait();
     return successfully_connected;
   }
@@ -151,7 +136,8 @@ QuicrService::QuicrService(size_t queue_capacity,
   , logger(logger_in)
   , client(std::move(client_in))
   , namespaces(welcome_ns_in, group_ns_in, user_id_in)
-{}
+{
+}
 
 bool
 QuicrService::connect(bool as_creator)
@@ -160,13 +146,11 @@ QuicrService::connect(bool as_creator)
   // response for each one before doing the next.  They could be done in
   // parallel by having subscribe/publish_intent return std::future<bool> and
   // awaiting all of these futures together.
-  return client->connect()
-    // TODO(richbarn) Simplify the set of namespaces
-    && (as_creator || subscribe(namespaces.welcome_sub()))
-    && subscribe(namespaces.group_sub())
-    // Announce intent to publish on this user's namespaces
-    && publish_intent(namespaces.welcome_pub())
-    && publish_intent(namespaces.group_pub());
+  return client->connect() &&
+         (as_creator || subscribe(namespaces.welcome_sub())) &&
+         subscribe(namespaces.group_sub()) &&
+         publish_intent(namespaces.welcome_pub()) &&
+         publish_intent(namespaces.group_pub());
 }
 
 void
@@ -176,32 +160,16 @@ QuicrService::disconnect()
 }
 
 void
-QuicrService::join_request(mls::KeyPackage key_package)
+QuicrService::send(Message message)
 {
-  const auto name = namespaces.for_group();
-  const auto message = JoinRequest{ std::move(key_package) };
-  publish(name, encode(message));
-}
+  const auto is_welcome = std::holds_alternative<Welcome>(message);
+  const auto name =
+    (is_welcome) ? namespaces.for_welcome() : namespaces.for_group();
+  auto data = tls::marshal(QuicrMessage{ message });
 
-void QuicrService::welcome(mls::Welcome welcome)
-{
-  const auto name = namespaces.for_welcome();
-  const auto message = Welcome{ std::move(welcome) };
-  publish(name, encode(message));
-}
-
-void QuicrService::commit(mls::MLSMessage commit)
-{
-  const auto name = namespaces.for_group();
-  const auto message = Commit{ std::move(commit) };
-  publish(name, encode(message));
-}
-
-void QuicrService::leave_request(mls::MLSMessage proposal)
-{
-  const auto name = namespaces.for_group();
-  const auto message = LeaveRequest{ std::move(proposal) };
-  publish(name, encode(message));
+  logger->Log("Publish, name=" + std::string(name) +
+              " size=" + std::to_string(data.size()));
+  client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
 bool
@@ -224,12 +192,7 @@ QuicrService::subscribe(quicr::Namespace ns)
                     "bogus_auth_token",
                     std::move(empty));
 
-  const auto success = delegate->await_response();
-  if (success) {
-    sub_delegates.insert_or_assign(ns, delegate);
-  }
-
-  return success;
+  return delegate->await_response();
 }
 
 bool
@@ -239,14 +202,6 @@ QuicrService::publish_intent(quicr::Namespace ns)
   const auto delegate = std::make_shared<PubDelegate>(logger);
   client->publishIntent(delegate, ns, {}, {}, {});
   return delegate->await_response();
-}
-
-void
-QuicrService::publish(const quicr::Name& name, bytes&& data)
-{
-  logger->Log("Publish, name=" + std::string(name) +
-              " size=" + std::to_string(data.size()));
-  client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
 } // namespace delivery

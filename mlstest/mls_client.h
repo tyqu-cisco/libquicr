@@ -121,7 +121,7 @@ private:
 
   std::vector<Deferred<ParsedJoinRequest>> joins_to_commit;
   std::vector<Deferred<ParsedLeaveRequest>> leaves_to_commit;
-  std::optional<mls::LeafNode> old_leaf_node_to_commit;
+  std::atomic_bool self_update_to_commit;
 
   std::optional<std::thread> commit_thread;
   void make_commit();

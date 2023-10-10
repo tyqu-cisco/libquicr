@@ -70,20 +70,22 @@ public:
   {
     ok,
     fail,
-    stale,
-    future,
     removes_me,
   };
   HandleResult handle(const mls::MLSMessage& commit);
 
   // Access to the underlying MLS state
-  mls::State& get_state();
-  const mls::State& get_state() const;
+  uint32_t index() const { return get_state().index().val; }
+  uint64_t epoch() const { return get_state().epoch(); }
+  bytes epoch_authenticator() const { return get_state().epoch_authenticator(); }
   size_t member_count() const;
 
 private:
   MLSSession(mls::State&& state);
   bytes fresh_secret() const;
+
+  const mls::State& get_state() const;
+  mls::State& get_state();
 
   static uint32_t user_id_from_cred(const mls::Credential& cred);
   std::optional<mls::LeafIndex> leaf_for_user_id(uint32_t user_id) const;

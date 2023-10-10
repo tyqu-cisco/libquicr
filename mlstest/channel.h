@@ -1,9 +1,9 @@
 #pragma once
 
-#include <mutex>
+#include <chrono>
 #include <condition_variable>
 #include <deque>
-#include <chrono>
+#include <mutex>
 
 namespace channel {
 
@@ -12,7 +12,8 @@ struct Channel
 {
   Channel(size_t capacity)
     : _capacity(capacity)
-  {}
+  {
+  }
 
   std::optional<T> receive()
   {
@@ -32,7 +33,8 @@ struct Channel
   std::optional<T> receive(std::chrono::milliseconds wait_time)
   {
     auto lock = std::unique_lock<std::mutex>(_mutex);
-    const auto success = _cv.wait_for(lock, wait_time, [this] { return !is_empty() || !is_open(); });
+    const auto success = _cv.wait_for(
+      lock, wait_time, [this] { return !is_empty() || !is_open(); });
 
     if (!success || !is_open()) {
       return std::nullopt;
@@ -61,7 +63,8 @@ struct Channel
   bool send(T&& val, std::chrono::milliseconds wait_time)
   {
     auto lock = std::unique_lock<std::mutex>(_mutex);
-    const auto success = _cv.wait_for(lock, wait_time, [this] { return is_open() && has_capacity(); });
+    const auto success = _cv.wait_for(
+      lock, wait_time, [this] { return is_open() && has_capacity(); });
 
     if (!success || !is_open()) {
       return false;
@@ -94,22 +97,21 @@ template<typename T>
 struct Receiver;
 
 template<typename T>
-struct ChannelView {
+struct ChannelView
+{
   ChannelView(size_t capacity)
     : channel(std::make_shared<Channel<T>>(capacity))
-  {}
+  {
+  }
 
   ChannelView(std::shared_ptr<Channel<T>> channel_in)
     : channel(channel_in)
-  {}
-
-  Sender<T> make_sender() const {
-    return { channel };
+  {
   }
 
-  Receiver<T> make_receiver() const {
-    return { channel };
-  }
+  Sender<T> make_sender() const { return { channel }; }
+
+  Receiver<T> make_receiver() const { return { channel }; }
 
   bool is_open() const { return channel->is_open(); }
   bool is_empty() const { return channel->is_empty(); }
@@ -122,27 +124,36 @@ protected:
 };
 
 template<typename T>
-struct Sender : ChannelView<T> {
+struct Sender : ChannelView<T>
+{
   using parent = ChannelView<T>;
-  using parent::parent;
   using parent::channel;
+  using parent::parent;
 
   auto send(T&& val) const { return channel->send(std::move(val)); }
-  auto send(T&& val, std::chrono::milliseconds wait_time) const { return channel->send(std::move(val), wait_time); }
+  auto send(T&& val, std::chrono::milliseconds wait_time) const
+  {
+    return channel->send(std::move(val), wait_time);
+  }
 };
 
 template<typename T>
-struct Receiver : ChannelView<T> {
+struct Receiver : ChannelView<T>
+{
   using parent = ChannelView<T>;
-  using parent::parent;
   using parent::channel;
+  using parent::parent;
 
   auto receive() const { return channel->receive(); }
-  auto receive(std::chrono::milliseconds wait_time) const { return channel->receive(wait_time); }
+  auto receive(std::chrono::milliseconds wait_time) const
+  {
+    return channel->receive(wait_time);
+  }
 };
 
 template<typename T>
-std::tuple<Sender<T>, Receiver<T>> create(size_t capacity)
+std::tuple<Sender<T>, Receiver<T>>
+create(size_t capacity)
 {
   auto chan = std::make_shared<Channel<T>>(capacity);
   return { chan, chan };

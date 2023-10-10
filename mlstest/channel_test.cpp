@@ -10,9 +10,8 @@ TEST_CASE("Channel receive blocks on empty")
 {
   const auto [send, recv] = channel::create<uint32_t>(1);
 
-  auto recv_thread = std::thread([recv = std::move(recv)]() {
-    REQUIRE(recv.receive() == 42);
-  });
+  auto recv_thread =
+    std::thread([recv = std::move(recv)]() { REQUIRE(recv.receive() == 42); });
 
   std::this_thread::sleep_for(100ms);
   send.send(42);
