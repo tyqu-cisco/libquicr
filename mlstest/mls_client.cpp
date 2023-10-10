@@ -129,11 +129,10 @@ std::future<bool>
 MLSClient::join()
 {
   const auto _ = lock();
-  const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
-  const auto kp_id = NamespaceConfig::id_for(kp);
-
   join_promise = std::promise<bool>();
-  delivery_service->join_request(kp_id, kp);
+
+  const auto& kp = std::get<MLSInitInfo>(mls_session).key_package;
+  delivery_service->join_request(kp);
 
   return join_promise->get_future();
 }
@@ -418,8 +417,10 @@ MLSClient::make_commit()
   // Publish the Welcome and update our own state now that everything is OK
   advance(commit);
 
-  for (const auto& join : joins) {
-    delivery_service->welcome(join.join_id, welcome);
+  // Note: While it may seem harmless to send a Welcome if there are no joins,
+  // omitting this `if` guard causes one of the tests to hang.
+  if (!joins.empty()) {
+    delivery_service->welcome(welcome);
   }
 }
 

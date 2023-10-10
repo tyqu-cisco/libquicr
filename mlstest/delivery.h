@@ -18,17 +18,15 @@ using JoinID = uint32_t;
 using EpochID = uint64_t;
 
 struct JoinRequest {
-  JoinID join_id;
   mls::KeyPackage key_package;
 
-  TLS_SERIALIZABLE(join_id, key_package)
+  TLS_SERIALIZABLE(key_package)
 };
 
 struct Welcome {
-  JoinID join_id;
   mls::Welcome welcome;
 
-  TLS_SERIALIZABLE(join_id, welcome)
+  TLS_SERIALIZABLE(welcome)
 };
 
 struct Commit {
@@ -57,10 +55,10 @@ struct Service {
   virtual void disconnect() = 0;
 
   // Publish a JoinRequest containing the specified KeyPackage.
-  virtual void join_request(JoinID join_id, mls::KeyPackage key_package) = 0;
+  virtual void join_request(mls::KeyPackage key_package) = 0;
 
   // Respond to a JoinRequest with a Welcome message
-  virtual void welcome(JoinID join_id, mls::Welcome welcome) = 0;
+  virtual void welcome(mls::Welcome welcome) = 0;
 
   // Broadcast a Commit message to the group
   virtual void commit(mls::MLSMessage commit) = 0;
@@ -81,14 +79,15 @@ struct QuicrService : Service {
   QuicrService(size_t queue_capacity,
                cantina::LoggerPointer logger_in,
                std::shared_ptr<quicr::Client> client,
-               uint64_t group_id,
+               quicr::Namespace welcome_ns_in,
+               quicr::Namespace group_ns_in,
                uint32_t user_id);
 
   bool connect(bool as_creator) override;
   void disconnect() override;
 
-  void join_request(JoinID join_id, mls::KeyPackage key_package) override;
-  void welcome(JoinID join_id, mls::Welcome welcome) override;
+  void join_request(mls::KeyPackage key_package) override;
+  void welcome(mls::Welcome welcome) override;
   void commit(mls::MLSMessage commit) override;
   void leave_request(mls::MLSMessage proposal) override;
 
@@ -98,7 +97,6 @@ private:
   cantina::LoggerPointer logger;
   std::shared_ptr<quicr::Client> client;
   NamespaceConfig namespaces;
-  uint32_t user_id;
 
   bool subscribe(quicr::Namespace nspace);
   bool publish_intent(quicr::Namespace nspace);

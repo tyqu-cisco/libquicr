@@ -24,7 +24,6 @@ struct MLSInitInfo
 
 struct ParsedJoinRequest
 {
-  uint32_t join_id;
   uint32_t user_id;
   mls::KeyPackage key_package;
 };

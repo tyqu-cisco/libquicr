@@ -63,7 +63,7 @@ ParsedJoinRequest
 MLSSession::parse_join(delivery::JoinRequest&& join)
 {
   const auto user_id = user_id_from_cred(join.key_package.leaf_node.credential);
-  return { join.join_id, user_id, join.key_package };
+  return { user_id, join.key_package };
 }
 
 bool

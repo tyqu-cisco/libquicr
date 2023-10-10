@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
+#include "namespace_config.h"
 #include "mls_client.h"
 
 #include <transport/transport.h>
@@ -33,7 +34,10 @@ public:
       std::numeric_limits<uint64_t>::min(),
       std::numeric_limits<uint64_t>::max());
     auto engine = std::random_device();
-    group_id = dist(engine);
+    const auto group_id = dist(engine);
+    const auto group_id_ns = SubNamespace{}.extend(group_id, 63);
+    welcome_ns = group_id_ns.extend(0x00, 8);
+    group_ns = group_id_ns.extend(0x01, 8);
   }
 
 protected:
@@ -45,6 +49,8 @@ protected:
   uint64_t group_id = 0;
   uint32_t next_user_id = 0x00000000;
   size_t message_queue_capacity = 10;
+  quicr::Namespace welcome_ns;
+  quicr::Namespace group_ns;
 
   std::shared_ptr<epoch_sync::Service> epoch_sync_service;
 
@@ -62,7 +68,8 @@ protected:
     const auto delivery_service = std::make_shared<delivery::QuicrService>(message_queue_capacity,
                user_logger,
                client,
-               group_id,
+               welcome_ns,
+               group_ns,
                next_user_id);
 
     const auto config = MLSClient::Config{

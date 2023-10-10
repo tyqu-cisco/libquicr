@@ -144,13 +144,13 @@ private:
 QuicrService::QuicrService(size_t queue_capacity,
                            cantina::LoggerPointer logger_in,
                            std::shared_ptr<quicr::Client> client_in,
-                           uint64_t group_id_in,
+                           quicr::Namespace welcome_ns_in,
+                           quicr::Namespace group_ns_in,
                            uint32_t user_id_in)
   : Service(queue_capacity)
   , logger(logger_in)
   , client(std::move(client_in))
-  , namespaces(group_id_in)
-  , user_id(user_id_in)
+  , namespaces(welcome_ns_in, group_ns_in, user_id_in)
 {}
 
 bool
@@ -162,15 +162,11 @@ QuicrService::connect(bool as_creator)
   // awaiting all of these futures together.
   return client->connect()
     // TODO(richbarn) Simplify the set of namespaces
-    && subscribe(namespaces.key_package_sub())
     && (as_creator || subscribe(namespaces.welcome_sub()))
-    && subscribe(namespaces.commit_sub())
-    && subscribe(namespaces.leave_sub())
+    && subscribe(namespaces.group_sub())
     // Announce intent to publish on this user's namespaces
-    && publish_intent(namespaces.key_package_pub(user_id))
-    && publish_intent(namespaces.welcome_pub(user_id))
-    && publish_intent(namespaces.commit_pub(user_id))
-    && publish_intent(namespaces.leave_pub(user_id));
+    && publish_intent(namespaces.welcome_pub())
+    && publish_intent(namespaces.group_pub());
 }
 
 void
@@ -180,31 +176,30 @@ QuicrService::disconnect()
 }
 
 void
-QuicrService::join_request(JoinID join_id, mls::KeyPackage key_package)
+QuicrService::join_request(mls::KeyPackage key_package)
 {
-  const auto name = namespaces.for_key_package(user_id, join_id);
-  const auto message = JoinRequest{ join_id, std::move(key_package) };
+  const auto name = namespaces.for_group();
+  const auto message = JoinRequest{ std::move(key_package) };
   publish(name, encode(message));
 }
 
-void QuicrService::welcome(JoinID join_id, mls::Welcome welcome)
+void QuicrService::welcome(mls::Welcome welcome)
 {
-  const auto name = namespaces.for_welcome(user_id, join_id);
-  const auto message = Welcome{ join_id, std::move(welcome) };
+  const auto name = namespaces.for_welcome();
+  const auto message = Welcome{ std::move(welcome) };
   publish(name, encode(message));
 }
 
 void QuicrService::commit(mls::MLSMessage commit)
 {
-  const auto epoch_id = commit.epoch();
-  const auto name = namespaces.for_commit(user_id, epoch_id);
+  const auto name = namespaces.for_group();
   const auto message = Commit{ std::move(commit) };
   publish(name, encode(message));
 }
 
 void QuicrService::leave_request(mls::MLSMessage proposal)
 {
-  const auto name = namespaces.for_leave(user_id);
+  const auto name = namespaces.for_group();
   const auto message = LeaveRequest{ std::move(proposal) };
   publish(name, encode(message));
 }
