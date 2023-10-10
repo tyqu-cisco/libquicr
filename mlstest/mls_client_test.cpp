@@ -47,7 +47,7 @@ protected:
                                     .tls_key_filename = NULL };
 
   uint64_t group_id = 0;
-  uint32_t next_user_id = 0x00000000;
+  uint32_t next_endpoint_id = 0x00000000;
   size_t message_queue_capacity = 10;
   quicr::Namespace welcome_ns;
   quicr::Namespace group_ns;
@@ -60,7 +60,7 @@ protected:
 
   MLSClient::Config next_config()
   {
-    const auto* user_name = user_names.at(next_user_id);
+    const auto* user_name = user_names.at(next_endpoint_id);
     const auto user_logger =
       std::make_shared<cantina::Logger>(user_name, logger, true);
 
@@ -71,17 +71,17 @@ protected:
                                                client,
                                                welcome_ns,
                                                group_ns,
-                                               next_user_id);
+                                               next_endpoint_id);
 
     const auto config = MLSClient::Config{
       .group_id = group_id,
-      .user_id = next_user_id,
+      .endpoint_id = next_endpoint_id,
       .logger = user_logger,
       .epoch_sync_service = epoch_sync_service,
       .delivery_service = delivery_service,
     };
 
-    next_user_id += 1;
+    next_endpoint_id += 1;
     return config;
   }
 };

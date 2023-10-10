@@ -10,10 +10,10 @@ static const size_t epochs_capacity = 100;
 MLSClient::MLSClient(const Config& config)
   : logger(config.logger)
   , group_id(config.group_id)
-  , user_id(config.user_id)
+  , endpoint_id(config.endpoint_id)
   , epoch_sync_service(config.epoch_sync_service)
   , delivery_service(config.delivery_service)
-  , mls_session(MLSInitInfo{ suite, user_id })
+  , mls_session(MLSInitInfo{ suite, endpoint_id })
   , epochs(epochs_capacity)
 {
 }
@@ -241,9 +241,8 @@ MLSClient::handle(delivery::Welcome&& welcome)
   }
 
   auto& session = std::get<MLSSession>(mls_session);
-  epochs.send({ session.epoch(),
-                session.member_count(),
-                session.epoch_authenticator() });
+  epochs.send(
+    { session.epoch(), session.member_count(), session.epoch_authenticator() });
 
   delivery_service->join_complete();
 
@@ -376,11 +375,11 @@ MLSClient::make_commit()
   // Construct the commit
   logger->info << "Committing Join=[";
   for (const auto& join : joins) {
-    logger->info << join.user_id << ",";
+    logger->info << join.endpoint_id << ",";
   }
   logger->info << "] SelfUpdate=" << (self_update ? "Y" : "N") << " Leave=[";
   for (const auto& leave : leaves) {
-    logger->info << leave.user_id << ",";
+    logger->info << leave.endpoint_id << ",";
   }
   logger->info << "]" << std::flush;
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
@@ -442,8 +441,7 @@ MLSClient::advance(const mls::MLSMessage& commit)
       epochs.send({ session.epoch(),
                     session.member_count(),
                     session.epoch_authenticator() });
-      logger->Log("Updated to epoch " +
-                  std::to_string(session.epoch()));
+      logger->Log("Updated to epoch " + std::to_string(session.epoch()));
       break;
 
     case MLSSession::HandleResult::fail:

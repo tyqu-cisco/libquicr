@@ -6,12 +6,12 @@
 
 using namespace mls;
 
-MLSInitInfo::MLSInitInfo(CipherSuite suite_in, uint32_t user_id_in)
+MLSInitInfo::MLSInitInfo(CipherSuite suite_in, uint32_t endpoint_id_in)
   : suite(suite_in)
   , init_key(HPKEPrivateKey::generate(suite))
   , encryption_key(HPKEPrivateKey::generate(suite))
   , signature_key(SignaturePrivateKey::generate(suite))
-  , credential(Credential::basic(tls::marshal(user_id_in)))
+  , credential(Credential::basic(tls::marshal(endpoint_id_in)))
 {
   auto leaf_node = LeafNode{ suite,
                              encryption_key.public_key,
@@ -58,14 +58,15 @@ MLSSession::join(const MLSInitInfo& info, const mls::Welcome& welcome)
 ParsedJoinRequest
 MLSSession::parse_join(delivery::JoinRequest&& join)
 {
-  const auto user_id = user_id_from_cred(join.key_package.leaf_node.credential);
-  return { user_id, join.key_package };
+  const auto endpoint_id =
+    endpoint_id_from_cred(join.key_package.leaf_node.credential);
+  return { endpoint_id, join.key_package };
 }
 
 bool
 MLSSession::obsolete(const ParsedJoinRequest& req) const
 {
-  return !!leaf_for_user_id(req.user_id);
+  return !!leaf_for_endpoint_id(req.endpoint_id);
 }
 
 mls::MLSMessage
@@ -103,15 +104,15 @@ MLSSession::parse_leave(delivery::LeaveRequest&& leave)
 
   // Verify that the self-removed user has the indicated user ID
   const auto leaf = mls_state.tree().leaf_node(remove.removed).value();
-  const auto user_id = user_id_from_cred(leaf.credential);
+  const auto endpoint_id = endpoint_id_from_cred(leaf.credential);
 
-  return { { user_id, epoch } };
+  return { { endpoint_id, epoch } };
 }
 
 bool
 MLSSession::obsolete(const ParsedLeaveRequest& req) const
 {
-  return !leaf_for_user_id(req.user_id);
+  return !leaf_for_endpoint_id(req.endpoint_id);
 }
 
 std::tuple<mls::MLSMessage, mls::Welcome>
@@ -132,7 +133,7 @@ MLSSession::commit(bool force_path,
                  leaves.end(),
                  std::back_inserter(proposals),
                  [&](const auto& req) {
-                   const auto index = leaf_for_user_id(req.user_id);
+                   const auto index = leaf_for_endpoint_id(req.endpoint_id);
                    return mls_state.remove_proposal(index.value());
                  });
 
@@ -189,11 +190,12 @@ MLSSession::distance_from(size_t n_adds,
 {
   auto& mls_state = get_state();
   auto removed = std::set<mls::LeafIndex>{};
-  std::transform(
-    leaves.begin(),
-    leaves.end(),
-    std::inserter(removed, removed.begin()),
-    [&](const auto& req) { return leaf_for_user_id(req.user_id).value(); });
+  std::transform(leaves.begin(),
+                 leaves.end(),
+                 std::inserter(removed, removed.begin()),
+                 [&](const auto& req) {
+                   return leaf_for_endpoint_id(req.endpoint_id).value();
+                 });
 
   auto affected = add_locations(n_adds, mls_state.tree());
   affected.insert(affected.end(), removed.begin(), removed.end());
@@ -303,18 +305,18 @@ MLSSession::fresh_secret() const
 }
 
 uint32_t
-MLSSession::user_id_from_cred(const Credential& cred)
+MLSSession::endpoint_id_from_cred(const Credential& cred)
 {
   const auto& basic_cred = cred.get<BasicCredential>();
   return tls::get<uint32_t>(basic_cred.identity);
 }
 
 std::optional<LeafIndex>
-MLSSession::leaf_for_user_id(uint32_t user_id) const
+MLSSession::leaf_for_endpoint_id(uint32_t endpoint_id) const
 {
   auto out = std::optional<LeafIndex>{};
   get_state().tree().any_leaf([&](auto i, const auto& leaf) {
-    auto match = user_id_from_cred(leaf.credential) == user_id;
+    auto match = endpoint_id_from_cred(leaf.credential) == endpoint_id;
     if (match) {
       out = i;
     }

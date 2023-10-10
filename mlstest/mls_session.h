@@ -76,7 +76,10 @@ public:
   // Access to the underlying MLS state
   uint32_t index() const { return get_state().index().val; }
   uint64_t epoch() const { return get_state().epoch(); }
-  bytes epoch_authenticator() const { return get_state().epoch_authenticator(); }
+  bytes epoch_authenticator() const
+  {
+    return get_state().epoch_authenticator();
+  }
   size_t member_count() const;
 
 private:

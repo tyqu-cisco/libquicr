@@ -128,11 +128,11 @@ QuicrService::QuicrService(size_t queue_capacity,
                            std::shared_ptr<quicr::Client> client_in,
                            quicr::Namespace welcome_ns_in,
                            quicr::Namespace group_ns_in,
-                           uint32_t user_id_in)
+                           uint32_t endpoint_id_in)
   : Service(queue_capacity)
   , logger(logger_in)
   , client(std::move(client_in))
-  , namespaces(welcome_ns_in, group_ns_in, user_id_in)
+  , namespaces(welcome_ns_in, group_ns_in, endpoint_id_in)
 {
 }
 
@@ -172,7 +172,8 @@ QuicrService::send(Message message)
 void
 QuicrService::join_complete()
 {
-  client->unsubscribe(namespaces.welcome_sub(), "bogus_origin_url", "bogus_auth_token");
+  client->unsubscribe(
+    namespaces.welcome_sub(), "bogus_origin_url", "bogus_auth_token");
 }
 
 bool
