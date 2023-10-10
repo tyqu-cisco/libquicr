@@ -41,8 +41,7 @@ public:
   static MLSSession create(const MLSInitInfo& info, uint64_t group_id);
 
   // Join logic
-  static std::optional<MLSSession> join(const MLSInitInfo& info,
-                                        const mls::Welcome& welcome);
+  static MLSSession join(const MLSInitInfo& info, const mls::Welcome& welcome);
   static ParsedJoinRequest parse_join(delivery::JoinRequest&& join);
   bool obsolete(const ParsedJoinRequest& req) const;
 

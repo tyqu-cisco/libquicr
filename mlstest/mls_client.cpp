@@ -228,15 +228,14 @@ MLSClient::handle(delivery::Welcome&& welcome)
     return;
   }
 
-  // Join the group
   const auto& init_info = std::get<MLSInitInfo>(mls_session);
-  const auto maybe_mls_session = MLSSession::join(init_info, welcome.welcome);
-  if (!maybe_mls_session) {
+  if (!welcome.welcome.find(init_info.key_package)) {
     logger->Log("Ignoring Welcome; not for me");
     return;
   }
 
-  mls_session = maybe_mls_session.value();
+  // Join the group
+  mls_session = MLSSession::join(init_info, welcome.welcome);
   if (join_promise) {
     join_promise->set_value(true);
   }
@@ -246,10 +245,7 @@ MLSClient::handle(delivery::Welcome&& welcome)
                 session.member_count(),
                 session.epoch_authenticator() });
 
-  // TODO(richbarn): Re-enable unsubscribing from welcome messages once
-  // joined.  Need to figure out how to do this within the DS framework.
-  // const auto welcome_ns = namespaces.welcome_sub();
-  // client->unsubscribe(welcome_ns, "bogus_origin_url", "bogus_auth_token");
+  delivery_service->join_complete();
 
   // Request an empty commit to populate my path in the tree
   self_update_to_commit = true;

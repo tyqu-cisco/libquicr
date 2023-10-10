@@ -62,6 +62,9 @@ struct Service
   // Broadcast a Commit message to the group
   virtual void send(Message message) = 0;
 
+  // Notify the transport that the client is now joined
+  virtual void join_complete() = 0;
+
   // Read incoming messages
   channel::Receiver<Message> inbound_messages;
 
@@ -84,6 +87,7 @@ struct QuicrService : Service
   bool connect(bool as_creator) override;
   void disconnect() override;
   void send(Message message) override;
+  void join_complete() override;
 
 private:
   static const uint16_t default_ttl_ms = 1000;
@@ -94,10 +98,10 @@ private:
 
   bool subscribe(quicr::Namespace nspace);
   bool publish_intent(quicr::Namespace nspace);
+  void deliver(Message&& message);
 
   struct SubDelegate;
   struct PubDelegate;
-  std::map<quicr::Namespace, std::shared_ptr<SubDelegate>> sub_delegates{};
 };
 
 } // namespace delivery

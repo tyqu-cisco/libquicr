@@ -35,10 +35,8 @@ struct QuicrService::SubDelegate : NullSubscribeDelegate
 {
 public:
   SubDelegate(cantina::LoggerPointer logger_in,
-              NamespaceConfig namespaces_in,
               channel::Sender<Message> queue_in)
     : logger(logger_in)
-    , namespaces(namespaces_in)
     , queue(queue_in)
   {
   }
@@ -84,7 +82,6 @@ public:
 
 private:
   cantina::LoggerPointer logger;
-  NamespaceConfig namespaces;
   channel::Sender<Message> queue;
   std::latch response_latch{ 1 };
   std::atomic_bool successfully_connected = false;
@@ -172,15 +169,16 @@ QuicrService::send(Message message)
   client->publishNamedObject(name, 0, default_ttl_ms, false, std::move(data));
 }
 
+void
+QuicrService::join_complete()
+{
+  client->unsubscribe(namespaces.welcome_sub(), "bogus_origin_url", "bogus_auth_token");
+}
+
 bool
 QuicrService::subscribe(quicr::Namespace ns)
 {
-  if (sub_delegates.count(ns)) {
-    return true;
-  }
-
-  const auto delegate =
-    std::make_shared<SubDelegate>(logger, namespaces, make_sender());
+  const auto delegate = std::make_shared<SubDelegate>(logger, make_sender());
 
   logger->Log("Subscribe to " + std::string(ns));
   quicr::bytes empty;

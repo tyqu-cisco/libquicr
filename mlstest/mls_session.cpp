@@ -42,13 +42,9 @@ MLSSession::create(const MLSInitInfo& info, uint64_t group_id)
   return { std::move(mls_state) };
 }
 
-std::optional<MLSSession>
+MLSSession
 MLSSession::join(const MLSInitInfo& info, const mls::Welcome& welcome)
 {
-  if (!welcome.find(info.key_package)) {
-    return std::nullopt;
-  }
-
   auto state = State{ info.init_key,
                       info.encryption_key,
                       info.signature_key,
