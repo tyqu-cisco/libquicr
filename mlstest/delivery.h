@@ -82,7 +82,7 @@ struct QuicrService : Service
                std::shared_ptr<quicr::Client> client,
                quicr::Namespace welcome_ns_in,
                quicr::Namespace group_ns_in,
-               uint32_t user_id);
+               uint32_t endpoint_id);
 
   bool connect(bool as_creator) override;
   void disconnect() override;

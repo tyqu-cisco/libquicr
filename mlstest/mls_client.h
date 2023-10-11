@@ -21,7 +21,7 @@ public:
   struct Config
   {
     uint64_t group_id;
-    uint32_t user_id;
+    uint32_t endpoint_id;
     cantina::LoggerPointer logger;
     std::shared_ptr<epoch_sync::Service> epoch_sync_service;
     std::shared_ptr<delivery::Service> delivery_service;
@@ -61,7 +61,7 @@ private:
 
   // Pub/Sub operations
   uint64_t group_id;
-  uint32_t user_id;
+  uint32_t endpoint_id;
 
   // MLS operations
   const mls::CipherSuite suite{

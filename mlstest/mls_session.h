@@ -19,18 +19,18 @@ struct MLSInitInfo
   mls::SignaturePrivateKey signature_key;
   mls::Credential credential;
 
-  MLSInitInfo(mls::CipherSuite suite, uint32_t user_id);
+  MLSInitInfo(mls::CipherSuite suite, uint32_t endpoint_id);
 };
 
 struct ParsedJoinRequest
 {
-  uint32_t user_id;
+  uint32_t endpoint_id;
   mls::KeyPackage key_package;
 };
 
 struct ParsedLeaveRequest
 {
-  uint32_t user_id;
+  uint32_t endpoint_id;
   mls::epoch_t epoch;
 };
 
@@ -89,8 +89,9 @@ private:
   const mls::State& get_state() const;
   mls::State& get_state();
 
-  static uint32_t user_id_from_cred(const mls::Credential& cred);
-  std::optional<mls::LeafIndex> leaf_for_user_id(uint32_t user_id) const;
+  static uint32_t endpoint_id_from_cred(const mls::Credential& cred);
+  std::optional<mls::LeafIndex> leaf_for_endpoint_id(
+    uint32_t endpoint_id) const;
 
   void add_state(mls::State&& state);
   bool has_state(mls::epoch_t epoch);
