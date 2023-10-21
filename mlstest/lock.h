@@ -104,7 +104,6 @@ private:
 
   std::map<LockID, Lock> acquired_locks;
   std::set<LockID> destroyed_locks;
-
   TimePoint clean_up_expired();
 };
 
