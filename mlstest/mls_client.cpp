@@ -25,7 +25,7 @@ MLSClient::~MLSClient()
   disconnect();
 }
 
-lock::ThingID
+lock::LockID
 make_lock_id(uint64_t group_id, uint64_t epoch)
 {
   auto w = mls::tls::ostream{};
@@ -36,33 +36,46 @@ make_lock_id(uint64_t group_id, uint64_t epoch)
 bool
 MLSClient::maybe_create_session()
 {
-  // Check to see whether the group exists (at epoch zero)
+  // Attempt to acquire the lock for this group at epoch 0
   const auto lock_id = make_lock_id(group_id, 0);
-  if (lock_service->contains(lock_id)) {
+  const auto acquire_resp =
+    lock_service->acquire(lock_id, create_lock_duration);
+
+  // If the lock has been destroyed, someone else has already created the group.
+  if (std::holds_alternative<lock::Destroyed>(acquire_resp)) {
     return false;
   }
 
-  // If not, attempt to acquire the lock for epoch zero
-  const auto lock_resp = lock_service->lock(lock_id, create_lock_duration);
-
-  // If the lock is already engaged, wait to see whether someone else succeeds
-  // in creating the group.
-  if (std::holds_alternative<lock::Conflict>(lock_resp)) {
-    const auto& conflict = std::get<lock::Conflict>(lock_resp);
-    std::this_thread::sleep_until(conflict.retry_after);
+  // If the lock is locked, someone else is in the process of creating the
+  // group, and we should retry once the lock releases.
+  if (std::holds_alternative<lock::Locked>(acquire_resp)) {
+    const auto& acquired = std::get<lock::Locked>(acquire_resp);
+    std::this_thread::sleep_until(acquired.expiry);
     return maybe_create_session();
   }
 
-  if (!std::holds_alternative<lock::OK>(lock_resp)) {
-    // Some unspecified failure
+  // Otherwise, the response should be OK, and we can grab the destroy token
+  if (!std::holds_alternative<lock::AcquireOK>(acquire_resp)) {
+    // Unspecified failure
     return false;
   }
 
+  const auto destroy_token =
+    std::get<lock::AcquireOK>(acquire_resp).destroy_token;
+
   // Otherwise, create the group and report that the group has been created
   const auto init_info = std::get<MLSInitInfo>(mls_session);
-  mls_session = MLSSession::create(init_info, group_id);
+  const auto session = MLSSession::create(init_info, group_id);
 
-  lock_service->add(lock_id);
+  // Destroy the epoch 0 lock to signal that the group has been created
+  const auto destroy_resp = lock_service->destroy(lock_id, destroy_token);
+  if (!std::holds_alternative<lock::DestroyOK>(destroy_resp)) {
+    // Unspecified failure
+    return false;
+  }
+
+  // Now that everything has gone well, install the session locally
+  mls_session = session;
   return true;
 }
 
@@ -320,16 +333,20 @@ MLSClient::not_before(uint32_t distance)
 MLSClient::Deferred<ParsedJoinRequest>
 MLSClient::defer(ParsedJoinRequest&& join)
 {
-  const auto& session = std::get<MLSSession>(mls_session);
-  const auto distance = session.distance_from(joins_to_commit.size(), {});
+  auto distance = uint32_t(0);
+  if (joined()) {
+    distance = session().distance_from(joins_to_commit.size(), {});
+  }
   return { not_before(distance), std::move(join) };
 }
 
 MLSClient::Deferred<ParsedLeaveRequest>
 MLSClient::defer(ParsedLeaveRequest&& leave)
 {
-  const auto& session = std::get<MLSSession>(mls_session);
-  const auto distance = session.distance_from(0, { leave });
+  auto distance = uint32_t(0);
+  if (joined()) {
+    distance = session().distance_from(0, { leave });
+  }
   return { not_before(distance), std::move(leave) };
 }
 
@@ -385,28 +402,36 @@ MLSClient::make_commit()
   // Get permission to send a commit
   const auto next_epoch = session.epoch() + 1;
   const auto lock_id = make_lock_id(group_id, next_epoch);
-  if (lock_service->contains(lock_id)) {
+  const auto acquire_resp =
+    lock_service->acquire(lock_id, commit_lock_duration);
+
+  if (std::holds_alternative<lock::Destroyed>(acquire_resp)) {
     logger->info << "Failed to commit: MLS state is behind" << std::flush;
-    return;
   }
 
-  const auto lock_resp = lock_service->lock(lock_id, commit_lock_duration);
-  if (std::holds_alternative<lock::Conflict>(lock_resp)) {
+  if (std::holds_alternative<lock::Locked>(acquire_resp)) {
     logger->info << "Failed to commit: Conflict" << std::flush;
     return;
   }
 
-  if (!std::holds_alternative<lock::OK>(lock_resp)) {
-    logger->info << "Failed to commit: Unspecified failure (" << lock_resp.index()
-                 << ")" << std::flush;
+  // Otherwise, the response should be OK, and we can grab the destroy token
+  if (!std::holds_alternative<lock::AcquireOK>(acquire_resp)) {
+    logger->info << "Failed to commit: Failed to acquire lock" << std::flush;
     return;
   }
+
+  const auto destroy_token =
+    std::get<lock::AcquireOK>(acquire_resp).destroy_token;
 
   // Publish the commit
   delivery_service->send(delivery::Commit{ commit });
 
   // Report that the commit has been sent
-  lock_service->add(lock_id);
+  const auto destroy_resp = lock_service->destroy(lock_id, destroy_token);
+  if (!std::holds_alternative<lock::DestroyOK>(destroy_resp)) {
+    logger->info << "Failed to commit: Failed to destroy lock" << std::flush;
+    return;
+  }
 
   // Publish the Welcome and update our own state now that everything is OK
   advance(commit);

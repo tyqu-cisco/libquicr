@@ -15,7 +15,7 @@ class MLSTest
 public:
   MLSTest()
     : logger(std::make_shared<cantina::Logger>(true))
-    , lock_service(std::make_shared<lock::InMemoryService>())
+    , lock_service(std::make_shared<lock::InMemoryService>(logger))
   {
     // Connect to a relay
     const auto* relay_var = getenv("MLS_RELAY");
