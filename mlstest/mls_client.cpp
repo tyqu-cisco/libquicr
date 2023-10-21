@@ -6,12 +6,14 @@ using namespace mls;
 using namespace std::chrono_literals;
 
 static const size_t epochs_capacity = 100;
+static const auto create_lock_duration = 500ms;
+static const auto commit_lock_duration = 500ms;
 
 MLSClient::MLSClient(const Config& config)
   : logger(config.logger)
   , group_id(config.group_id)
   , endpoint_id(config.endpoint_id)
-  , epoch_sync_service(config.epoch_sync_service)
+  , lock_service(config.lock_service)
   , delivery_service(config.delivery_service)
   , mls_session(MLSInitInfo{ suite, endpoint_id })
   , epochs(epochs_capacity)
@@ -23,46 +25,44 @@ MLSClient::~MLSClient()
   disconnect();
 }
 
+lock::ThingID
+make_lock_id(uint64_t group_id, uint64_t epoch)
+{
+  auto w = mls::tls::ostream{};
+  w << group_id << epoch;
+  return w.bytes();
+}
+
 bool
 MLSClient::maybe_create_session()
 {
-  using namespace epoch_sync;
-  static const auto invalid_tx_retry = std::chrono::milliseconds(100);
-
-  // Get permission to create the group
-  const auto init_resp = epoch_sync_service->create_init(group_id);
-  if (std::holds_alternative<create_init::Created>(init_resp)) {
+  // Check to see whether the group exists (at epoch zero)
+  const auto lock_id = make_lock_id(group_id, 0);
+  if (lock_service->contains(lock_id)) {
     return false;
   }
 
-  if (std::holds_alternative<create_init::Conflict>(init_resp)) {
-    const auto& conflict = std::get<create_init::Conflict>(init_resp);
+  // If not, attempt to acquire the lock for epoch zero
+  const auto lock_resp = lock_service->lock(lock_id, create_lock_duration);
+
+  // If the lock is already engaged, wait to see whether someone else succeeds
+  // in creating the group.
+  if (std::holds_alternative<lock::Conflict>(lock_resp)) {
+    const auto& conflict = std::get<lock::Conflict>(lock_resp);
     std::this_thread::sleep_until(conflict.retry_after);
     return maybe_create_session();
   }
 
-  const auto& init_ok = std::get<create_init::OK>(init_resp);
-  const auto tx_id = init_ok.transaction_id;
-
-  // Create the group
-  const auto init_info = std::get<MLSInitInfo>(mls_session);
-  const auto session = MLSSession::create(init_info, group_id);
-
-  // Report that the group has been created
-  const auto complete_resp =
-    epoch_sync_service->create_complete(group_id, tx_id);
-  if (std::holds_alternative<create_complete::Created>(complete_resp)) {
+  if (!std::holds_alternative<lock::OK>(lock_resp)) {
+    // Some unspecified failure
     return false;
   }
 
-  if (std::holds_alternative<create_complete::InvalidTransaction>(
-        complete_resp)) {
-    std::this_thread::sleep_for(invalid_tx_retry);
-    return maybe_create_session();
-  }
+  // Otherwise, create the group and report that the group has been created
+  const auto init_info = std::get<MLSInitInfo>(mls_session);
+  mls_session = MLSSession::create(init_info, group_id);
 
-  // Install the group
-  mls_session = session;
+  lock_service->add(lock_id);
   return true;
 }
 
@@ -336,8 +336,6 @@ MLSClient::defer(ParsedLeaveRequest&& leave)
 void
 MLSClient::make_commit()
 {
-  using namespace epoch_sync;
-
   // Can't commit if we're not joined
   if (!joined()) {
     return;
@@ -385,38 +383,30 @@ MLSClient::make_commit()
   auto [commit, welcome] = session.commit(self_update, joins, leaves);
 
   // Get permission to send a commit
-  const auto epoch = session.epoch();
-  const auto init_resp = epoch_sync_service->commit_init(group_id, epoch);
-  if (std::holds_alternative<commit_init::InvalidEpoch>(init_resp)) {
-    const auto server_epoch =
-      std::get<commit_init::InvalidEpoch>(init_resp).current_epoch;
-    logger->info << "Failed to initiate - epoch mismatch - mine=" << epoch
-                 << " server=" << server_epoch << std::flush;
+  const auto next_epoch = session.epoch() + 1;
+  const auto lock_id = make_lock_id(group_id, next_epoch);
+  if (lock_service->contains(lock_id)) {
+    logger->info << "Failed to commit: MLS state is behind" << std::flush;
     return;
   }
 
-  if (!std::holds_alternative<commit_init::OK>(init_resp)) {
-    // Permission denied for some other reason
-    logger->info << "Failed to initiate commit code=" << init_resp.index()
-                 << std::flush;
+  const auto lock_resp = lock_service->lock(lock_id, commit_lock_duration);
+  if (std::holds_alternative<lock::Conflict>(lock_resp)) {
+    logger->info << "Failed to commit: Conflict" << std::flush;
     return;
   }
 
-  const auto& init_ok = std::get<commit_init::OK>(init_resp);
-  const auto tx_id = init_ok.transaction_id;
+  if (!std::holds_alternative<lock::OK>(lock_resp)) {
+    logger->info << "Failed to commit: Unspecified failure (" << lock_resp.index()
+                 << ")" << std::flush;
+    return;
+  }
 
-  // Publish the commit and update our own state
+  // Publish the commit
   delivery_service->send(delivery::Commit{ commit });
 
-  // Inform the epoch server that the commit has been sent
-  const auto complete_resp =
-    epoch_sync_service->commit_complete(group_id, epoch, tx_id);
-  if (!std::holds_alternative<commit_complete::OK>(complete_resp)) {
-    // Something went wrong, abort and hope everyone ignores the commit
-    logger->info << "Failed to complete commit code=" << complete_resp.index()
-                 << std::flush;
-    return;
-  }
+  // Report that the commit has been sent
+  lock_service->add(lock_id);
 
   // Publish the Welcome and update our own state now that everything is OK
   advance(commit);

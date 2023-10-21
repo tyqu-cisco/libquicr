@@ -2,7 +2,7 @@
 
 #include "channel.h"
 #include "delivery.h"
-#include "epoch_sync.h"
+#include "lock.h"
 #include "mls_session.h"
 
 #include <cantina/logger.h>
@@ -23,7 +23,7 @@ public:
     uint64_t group_id;
     uint32_t endpoint_id;
     cantina::LoggerPointer logger;
-    std::shared_ptr<epoch_sync::Service> epoch_sync_service;
+    std::shared_ptr<lock::Service> lock_service;
     std::shared_ptr<delivery::Service> delivery_service;
   };
 
@@ -68,7 +68,7 @@ private:
     mls::CipherSuite::ID::P256_AES128GCM_SHA256_P256
   };
 
-  std::shared_ptr<epoch_sync::Service> epoch_sync_service;
+  std::shared_ptr<lock::Service> lock_service;
   std::shared_ptr<delivery::Service> delivery_service;
 
   std::optional<std::promise<bool>> join_promise;
