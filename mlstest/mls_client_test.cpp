@@ -15,7 +15,7 @@ class MLSTest
 public:
   MLSTest()
     : logger(std::make_shared<cantina::Logger>(true))
-    , lock_service(std::make_shared<lock::InMemoryService>(logger))
+    , counter_service(std::make_shared<counter::InMemoryService>(logger))
   {
     // Connect to a relay
     const auto* relay_var = getenv("MLS_RELAY");
@@ -52,7 +52,7 @@ protected:
   quicr::Namespace welcome_ns;
   quicr::Namespace group_ns;
 
-  std::shared_ptr<lock::Service> lock_service;
+  std::shared_ptr<counter::Service> counter_service;
 
   static constexpr auto user_names = std::array<const char*, 5>{
     "Alice", "Bob", "Charlie", "Diana", "Ellen",
@@ -77,7 +77,7 @@ protected:
       .group_id = group_id,
       .endpoint_id = next_endpoint_id,
       .logger = user_logger,
-      .lock_service = lock_service,
+      .counter_service = counter_service,
       .delivery_service = delivery_service,
     };
 

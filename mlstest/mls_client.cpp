@@ -13,7 +13,7 @@ MLSClient::MLSClient(const Config& config)
   : logger(config.logger)
   , group_id(config.group_id)
   , endpoint_id(config.endpoint_id)
-  , lock_service(config.lock_service)
+  , counter_service(config.counter_service)
   , delivery_service(config.delivery_service)
   , mls_session(MLSInitInfo{ suite, endpoint_id })
   , epochs(epochs_capacity)
@@ -25,51 +25,48 @@ MLSClient::~MLSClient()
   disconnect();
 }
 
-lock::LockID
-make_lock_id(uint64_t group_id, uint64_t epoch)
+counter::CounterID
+make_counter_id(uint64_t group_id)
 {
-  auto w = mls::tls::ostream{};
-  w << group_id << epoch;
-  return w.bytes();
+  return tls::marshal(group_id);
 }
 
 bool
 MLSClient::maybe_create_session()
 {
   // Attempt to acquire the lock for this group at epoch 0
-  const auto lock_id = make_lock_id(group_id, 0);
-  const auto acquire_resp =
-    lock_service->acquire(lock_id, create_lock_duration);
+  const auto counter_id = make_counter_id(group_id);
+  const auto lock_resp =
+    counter_service->lock(counter_id, 0, create_lock_duration);
 
-  // If the lock has been destroyed, someone else has already created the group.
-  if (std::holds_alternative<lock::Destroyed>(acquire_resp)) {
+  // If the counter has already advanced, someone else has already created the
+  // group.
+  if (std::holds_alternative<counter::OutOfSync>(lock_resp)) {
     return false;
   }
 
-  // If the lock is locked, someone else is in the process of creating the
+  // If the counter is locked, someone else is in the process of creating the
   // group, and we should retry once the lock releases.
-  if (std::holds_alternative<lock::Locked>(acquire_resp)) {
-    const auto& acquired = std::get<lock::Locked>(acquire_resp);
-    std::this_thread::sleep_until(acquired.expiry);
+  if (std::holds_alternative<counter::Locked>(lock_resp)) {
+    const auto& locked = std::get<counter::Locked>(lock_resp);
+    std::this_thread::sleep_until(locked.expiry);
     return maybe_create_session();
   }
 
-  // Otherwise, the response should be OK, and we can grab the destroy token
-  if (!std::holds_alternative<lock::AcquireOK>(acquire_resp)) {
+  // Otherwise, the response should be OK
+  if (!std::holds_alternative<counter::LockOK>(lock_resp)) {
     // Unspecified failure
     return false;
   }
-
-  const auto destroy_token =
-    std::get<lock::AcquireOK>(acquire_resp).destroy_token;
 
   // Otherwise, create the group and report that the group has been created
   const auto init_info = std::get<MLSInitInfo>(mls_session);
   const auto session = MLSSession::create(init_info, group_id);
 
   // Destroy the epoch 0 lock to signal that the group has been created
-  const auto destroy_resp = lock_service->destroy(lock_id, destroy_token);
-  if (!std::holds_alternative<lock::DestroyOK>(destroy_resp)) {
+  const auto& lock_id = std::get<counter::LockOK>(lock_resp).lock_id;
+  const auto increment_resp = counter_service->increment(lock_id);
+  if (!std::holds_alternative<counter::IncrementOK>(increment_resp)) {
     // Unspecified failure
     return false;
   }
@@ -401,34 +398,32 @@ MLSClient::make_commit()
 
   // Get permission to send a commit
   const auto next_epoch = session.epoch() + 1;
-  const auto lock_id = make_lock_id(group_id, next_epoch);
-  const auto acquire_resp =
-    lock_service->acquire(lock_id, commit_lock_duration);
+  const auto counter_id = make_counter_id(group_id);
+  const auto lock_resp =
+    counter_service->lock(counter_id, next_epoch, commit_lock_duration);
 
-  if (std::holds_alternative<lock::Destroyed>(acquire_resp)) {
+  if (std::holds_alternative<counter::OutOfSync>(lock_resp)) {
     logger->info << "Failed to commit: MLS state is behind" << std::flush;
   }
 
-  if (std::holds_alternative<lock::Locked>(acquire_resp)) {
+  if (std::holds_alternative<counter::Locked>(lock_resp)) {
     logger->info << "Failed to commit: Conflict" << std::flush;
     return;
   }
 
-  // Otherwise, the response should be OK, and we can grab the destroy token
-  if (!std::holds_alternative<lock::AcquireOK>(acquire_resp)) {
+  // Otherwise, the response should be OK
+  if (!std::holds_alternative<counter::LockOK>(lock_resp)) {
     logger->info << "Failed to commit: Failed to acquire lock" << std::flush;
     return;
   }
-
-  const auto destroy_token =
-    std::get<lock::AcquireOK>(acquire_resp).destroy_token;
 
   // Publish the commit
   delivery_service->send(delivery::Commit{ commit });
 
   // Report that the commit has been sent
-  const auto destroy_resp = lock_service->destroy(lock_id, destroy_token);
-  if (!std::holds_alternative<lock::DestroyOK>(destroy_resp)) {
+  const auto& lock_id = std::get<counter::LockOK>(lock_resp).lock_id;
+  const auto increment_resp = counter_service->increment(lock_id);
+  if (!std::holds_alternative<counter::IncrementOK>(increment_resp)) {
     logger->info << "Failed to commit: Failed to destroy lock" << std::flush;
     return;
   }
