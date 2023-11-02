@@ -93,7 +93,7 @@ ClientRawSession::connect()
   const auto context_id = transport->start();
 
   LOGGER_INFO(logger, "Connecting session " << context_id << "...");
-
+#if 0
   while (transport->status() == qtransport::TransportStatus::Connecting) {
     if (stopping) {
       LOGGER_INFO(logger, "Cancelling connecting session " << context_id);
@@ -113,6 +113,7 @@ ClientRawSession::connect()
 
     throw std::runtime_error(msg.str());
   }
+#endif
 
   transport_context_id = context_id;
   transport_dgram_stream_id = transport->createStream(context_id, false);

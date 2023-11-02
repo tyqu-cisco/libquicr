@@ -9,13 +9,16 @@ else()
     option(quicr_BUILD_BENCHMARKS "Build benchmarks for quicr" ON)
 endif()
 
+
 project(quicr
         VERSION 1.0.0.0
         DESCRIPTION "quicr library"
         LANGUAGES CXX)
 
-option(CLANG_TIDY "Perform linting with clang-tidy" OFF)
 
+option(BUILD_QUIC_TRANSPORT "Enable quic transport" OFF)
+        
+option(CLANG_TIDY "Perform linting with clang-tidy" OFF)
 ###
 ### Global Config
 ###

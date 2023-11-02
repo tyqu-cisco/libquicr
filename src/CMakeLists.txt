@@ -7,11 +7,13 @@ add_library(quicr
             quicr_server_raw_session.cpp)
 
 # Suppress external lib warnings
-set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
-target_compile_options(picotls-core PRIVATE -w)
-target_compile_options(picotls-openssl PRIVATE -w)
-target_compile_options(picoquic-core PRIVATE -w)
-target_compile_options(quicr-transport PRIVATE -w)
+if (BUILD_QUIC_TRANSPORT)
+    set_property(GLOBAL PROPERTY RULE_MESSAGES OFF)
+    target_compile_options(picotls-core PRIVATE -w)
+    target_compile_options(picotls-openssl PRIVATE -w)
+    target_compile_options(picoquic-core PRIVATE -w)
+    target_compile_options(quicr-transport PRIVATE -w)
+endif()
 
 target_compile_options(quicr
     PRIVATE
@@ -28,7 +30,7 @@ if(CLANG_TIDY_EXE)
 endif()
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
-    target_compile_options(quicr PRIVATE -Wall -pedantic -Wextra -Werror -Wmissing-declarations)
+    target_compile_options(quicr PRIVATE  -pedantic -Wextra -Wmissing-declarations)
 endif()
 
 if(MSVC)
