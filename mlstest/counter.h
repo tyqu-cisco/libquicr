@@ -21,7 +21,9 @@ struct Locked
 };
 
 struct OutOfSync
-{};
+{
+  Counter next_value;
+};
 
 struct Unauthorized
 {};
@@ -43,9 +45,10 @@ using IncrementResponse = std::variant<Unauthorized, IncrementOK>;
 // counter identifier is the group identifier.
 //
 // The counter service definition below does not actually expose the value of
-// the counter.  The assumption is that the consumers of the counter are
-// communicating updates to the counter outside this service (e.g., by sending
-// Commits), and only using the counter service to synchronize updates.
+// the counter, except in OutOfSync.  The assumption is that the consumers of
+// the counter are communicating updates to the counter outside this service
+// (e.g., by sending Commits), and only using the counter service to synchronize
+// updates.
 //
 // Before a counter can be incremented, it must be locked.  As part of the lock
 // operation, the caller states what their expected next counter value, which

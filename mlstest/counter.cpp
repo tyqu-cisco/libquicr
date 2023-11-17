@@ -35,7 +35,7 @@ InMemoryService::lock(const CounterID& counter_id,
     logger->info << "Lock counter_id=" << counter_id
                  << " => OutOfSync actual=" << next_value
                  << " expected=" << expected_next_value << std::flush;
-    return OutOfSync{};
+    return OutOfSync{ .next_value = expected_next_value };
   }
 
   // Check that the lock is not already locked

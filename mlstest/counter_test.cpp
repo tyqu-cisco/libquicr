@@ -105,6 +105,6 @@ TEST_CASE("In-memory counter service")
     // Attempting to initialize the counter again should fail
     const auto lock_resp_2 =
       counter_service->lock(counter_id, 0, lock_duration);
-    REQUIRE(std::holds_alternative<OutOfSync>(lock_resp_2));
+    REQUIRE(std::get<OutOfSync>(lock_resp_2).next_value == 1);
   }
 }
