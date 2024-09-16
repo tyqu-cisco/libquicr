@@ -126,6 +126,14 @@ if (NOT PLATFORM_ESP_IDF)
         add_library(OpenSSL::Crypto ALIAS crypto)
         export(TARGETS ssl crypto decrepit FILE boringssl.cmake) # Need to export as alias alone in upstream submodules doesn't work
 
+        # Unset some warnings for Xcode builds.
+        if (CMAKE_GENERATOR STREQUAL "Xcode")
+            set(WITH_DTRACE OFF)
+            target_compile_options(ssl PRIVATE -Wno-shorten-64-to-32)
+            target_compile_options(crypto PRIVATE -Wno-shorten-64-to-32)
+            target_compile_options(decrepit PRIVATE -Wno-shorten-64-to-32)
+            target_compile_options(fipsmodule PRIVATE -Wno-shorten-64-to-32)
+        endif()
 
         # picoTLS
         set(WITH_OPENSSL ON)
