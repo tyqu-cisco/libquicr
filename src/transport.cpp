@@ -1197,6 +1197,21 @@ namespace quicr {
         }
 
         auto& msg = stream_buffer->GetAny<MessageType>();
+
+        std::optional<uint64_t> message_length_decoded;
+        // parse length
+        if(!message_length_decoded) {
+            message_length_decoded = stream_buffer->DecodeUintV();
+            if (!message_length_decoded) {
+                return { msg, false };
+            }
+        }
+
+        // wait for length value to be filled in
+        if (!stream_buffer->Available(message_length_decoded.value())) {
+            return { msg, false };
+        }
+
         if (*stream_buffer >> msg) {
             return { msg, true };
         }
