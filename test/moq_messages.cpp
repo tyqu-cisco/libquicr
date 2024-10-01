@@ -802,3 +802,32 @@ TEST_CASE("MoqGoaway Message encode/decode")
     CHECK(Verify(net_data, static_cast<uint64_t>(MoqMessageType::GOAWAY), goaway_out));
     CHECK_EQ(FromASCII("go.away.now.no.return"), goaway_out.new_session_uri);
 }
+
+TEST_CASE("Tuple Message encode/decode")
+{
+    Serializer buffer;
+
+    auto tuple = Tuple{};
+    tuple.num_entries = 4;
+    tuple.entries[0] = FromASCII("moqt://conf.example.com/");
+    tuple.entries[1] = FromASCII("conf/1");
+    tuple.entries[2] = FromASCII("app/2");
+    tuple.entries[3] = FromASCII("user/3");
+
+
+
+    buffer << tuple;
+
+    std::vector<uint8_t> net_data = std::move(buffer.Take());
+    Tuple tuple_out{};
+
+    // TODO: support Size_depth > 1, if needed
+    StreamBuffer<uint8_t> in_buffer;
+    in_buffer.InitAny<Tuple>(); // Set parsed data to be of this type using out param
+    in_buffer.Push(net_data);
+    in_buffer >> tuple_out;
+    CHECK_EQ(tuple.num_entries, tuple_out.num_entries);
+    for (int i = 0; i < tuple.num_entries; i++) {
+        CHECK_EQ(tuple.entries[i], tuple_out.entries[i]);
+    }
+}

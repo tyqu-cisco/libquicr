@@ -111,9 +111,16 @@ namespace quicr::messages {
 
 
     // This is added to support v6, but this may not sustain for v7 onwards
-    // tuple is a bad design
+    //Tuple indicates that x is a tuple, consisting of a variable length integer encoded as described
+    // in ([RFC9000], Section 16),
+    // followed by that many variable length tuple fields, each of which are encoded as (b) above
     struct Tuple {
+        uint64_t num_entries {0};
+        std::array<Bytes, 32> entries;
 
+        template<class StreamBufferType>
+        friend bool operator>>(StreamBufferType& buffer, Tuple& tuple);
+        friend Serializer& operator<<(Serializer& buffer, const Tuple& tuple);
     };
 
     //

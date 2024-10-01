@@ -134,6 +134,45 @@ namespace quicr::messages {
     template bool operator>> <SafeStreamBuffer<uint8_t>>(SafeStreamBuffer<uint8_t>&, MoqParameter&);
 
     //
+    // Tuple
+    //
+
+    Serializer& operator<<(Serializer& buffer, const Tuple& tuple)
+    {
+
+        buffer.Push(UintVar(tuple.num_entries));
+        for(int i=0; i < tuple.num_entries; i++) {
+            buffer.PushLengthBytes(tuple.entries[i]);
+        }
+
+        return buffer;
+    }
+
+    template<class StreamBufferType>
+    bool operator>>(StreamBufferType& buffer, Tuple& tuple)
+    {
+
+        if (!ParseUintVField(buffer, tuple.num_entries)) {
+            return false;
+        }
+
+        if (tuple.num_entries > 32) {
+            return false;
+        }
+
+        for (int i = 0; i < tuple.num_entries; i++) {
+            if (!ParseBytesField(buffer, tuple.entries[i])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    template bool operator>> <StreamBuffer<uint8_t>>(StreamBuffer<uint8_t>&, Tuple&);
+    template bool operator>> <SafeStreamBuffer<uint8_t>>(SafeStreamBuffer<uint8_t>&, Tuple&);
+
+    //
     // Track Status
     //
     Serializer& operator<<(Serializer& buffer, const MoqTrackStatus& msg)
