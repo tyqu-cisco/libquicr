@@ -171,8 +171,9 @@ namespace quicr {
         client_setup.role_parameter.type = static_cast<uint64_t>(ParameterType::Role);
         client_setup.role_parameter.length = 0x1; // NOTE: not used for encode, size of value is used
         client_setup.role_parameter.value = { 0x03 };
-        client_setup.endpoint_id_parameter.value.assign(client_config_.endpoint_id.begin(),
-                                                        client_config_.endpoint_id.end());
+
+        //client_setup.endpoint_id_parameter.value.assign(client_config_.endpoint_id.begin(),
+        //                                                client_config_.endpoint_id.end());
 
         buffer << client_setup;
 

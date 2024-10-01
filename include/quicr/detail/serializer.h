@@ -51,6 +51,7 @@ namespace quicr {
         }
 
       private:
+        // std::vector<uint8_t>
         Bytes buffer_;
     };
 }

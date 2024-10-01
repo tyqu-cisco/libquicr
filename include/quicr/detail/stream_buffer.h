@@ -174,7 +174,9 @@ namespace quicr {
          *
          * @return True if data length is available, false if not.
          */
-        bool Available(std::uint32_t length) const noexcept { return buffer_.size() >= length; }
+        bool Available(std::uint64_t length) const noexcept {
+            return buffer_.size() >= length;
+        }
 
         void Push(const T& value)
         {

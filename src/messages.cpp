@@ -67,6 +67,17 @@ namespace quicr::messages {
         return true;
     }
 
+    template<class StreamBufferType>
+    static bool ParseByteField(StreamBufferType& buffer, Byte& field) {
+        auto val = buffer.Front();
+        if (!val) {
+            return false;
+        }
+        field = std::move(val.value());
+        buffer.Pop();
+        return true;
+    }
+
     static void PushExtensions(Serializer& buffer, const std::optional<Extensions>& extensions)
     {
         if (!extensions.has_value()) {
@@ -127,12 +138,16 @@ namespace quicr::messages {
     //
     Serializer& operator<<(Serializer& buffer, const MoqTrackStatus& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer.PushLengthBytes(msg.track_name);
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(msg.status_code)));
+        temp_buffer.Push(UintVar(msg.last_group_id));
+        temp_buffer.Push(UintVar(msg.last_object_id));
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::TRACK_STATUS)));
-        buffer.PushLengthBytes(msg.track_namespace);
-        buffer.PushLengthBytes(msg.track_name);
-        buffer.Push(UintVar(static_cast<uint64_t>(msg.status_code)));
-        buffer.Push(UintVar(msg.last_group_id));
-        buffer.Push(UintVar(msg.last_object_id));
+        buffer.PushLengthBytes(temp_buffer.View());
 
         return buffer;
     }
@@ -199,9 +214,13 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqTrackStatusRequest& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer.PushLengthBytes(msg.track_name);
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::TRACK_STATUS_REQUEST)));
-        buffer.PushLengthBytes(msg.track_namespace);
-        buffer.PushLengthBytes(msg.track_name);
+        buffer.PushLengthBytes(temp_buffer.View());
 
         return buffer;
     }
@@ -246,12 +265,14 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqSubscribe& msg)
     {
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE)));
-        buffer.Push(UintVar(msg.subscribe_id));
-        buffer.Push(UintVar(msg.track_alias));
-        buffer.PushLengthBytes(msg.track_namespace);
-        buffer.PushLengthBytes(msg.track_name);
-        buffer.Push(UintVar(static_cast<uint64_t>(msg.filter_type)));
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.subscribe_id));
+        temp_buffer.Push(UintVar(msg.track_alias));
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer.PushLengthBytes(msg.track_name);
+        temp_buffer.Push(msg.subscriber_priority);
+        temp_buffer.Push(msg.group_order);
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(msg.filter_type)));
 
         switch (msg.filter_type) {
             case FilterType::None:
@@ -259,22 +280,26 @@ namespace quicr::messages {
             case FilterType::LatestObject:
                 break;
             case FilterType::AbsoluteStart: {
-                buffer.Push(UintVar(msg.start_group));
-                buffer.Push(UintVar(msg.start_object));
+                temp_buffer.Push(UintVar(msg.start_group));
+                temp_buffer.Push(UintVar(msg.start_object));
             } break;
             case FilterType::AbsoluteRange:
-                buffer.Push(UintVar(msg.start_group));
-                buffer.Push(UintVar(msg.start_object));
-                buffer.Push(UintVar(msg.end_group));
-                buffer.Push(UintVar(msg.end_object));
+                temp_buffer.Push(UintVar(msg.start_group));
+                temp_buffer.Push(UintVar(msg.start_object));
+                temp_buffer.Push(UintVar(msg.end_group));
+                temp_buffer.Push(UintVar(msg.end_object));
                 break;
         }
 
-        buffer.Push(UintVar(msg.track_params.size()));
+        temp_buffer.Push(UintVar(msg.track_params.size()));
         for (const auto& param : msg.track_params) {
-            buffer.Push(UintVar(static_cast<uint64_t>(param.type)));
-            buffer.PushLengthBytes(param.value);
+            temp_buffer.Push(UintVar(static_cast<uint64_t>(param.type)));
+            temp_buffer.PushLengthBytes(param.value);
         }
+
+        // this is another copy (TLV)
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE)));
+        buffer.PushLengthBytes(temp_buffer.View());
 
         return buffer;
     }
@@ -313,6 +338,20 @@ namespace quicr::messages {
                 [[fallthrough]];
             }
             case 4: {
+                if (!ParseByteField(buffer, msg.subscriber_priority)) {
+                    return false;
+                }
+                msg.current_pos += 1;
+                [[fallthrough]];
+            }
+            case 5: {
+                if (!ParseByteField(buffer, msg.group_order)) {
+                    return false;
+                }
+                msg.current_pos += 1;
+                [[fallthrough]];
+            }
+            case 6: {
                 auto val = buffer.DecodeUintV();
                 if (!val) {
                     return false;
@@ -327,7 +366,7 @@ namespace quicr::messages {
                 }
                 [[fallthrough]];
             }
-            case 5: {
+            case 7: {
                 if (msg.filter_type == FilterType::AbsoluteStart || msg.filter_type == FilterType::AbsoluteRange) {
                     if (!ParseUintVField(buffer, msg.start_group)) {
                         return false;
@@ -336,7 +375,7 @@ namespace quicr::messages {
                 }
                 [[fallthrough]];
             }
-            case 6: {
+            case 8: {
                 if (msg.filter_type == FilterType::AbsoluteStart || msg.filter_type == FilterType::AbsoluteRange) {
                     if (!ParseUintVField(buffer, msg.start_object)) {
                         return false;
@@ -350,7 +389,7 @@ namespace quicr::messages {
                 }
                 [[fallthrough]];
             }
-            case 7: {
+            case 9: {
                 if (msg.filter_type == FilterType::AbsoluteRange) {
                     if (!ParseUintVField(buffer, msg.end_group)) {
                         return false;
@@ -360,7 +399,7 @@ namespace quicr::messages {
 
                 [[fallthrough]];
             }
-            case 8: {
+            case 10: {
                 if (msg.filter_type == FilterType::AbsoluteRange) {
                     if (!ParseUintVField(buffer, msg.end_object)) {
                         return false;
@@ -369,7 +408,7 @@ namespace quicr::messages {
                 }
                 [[fallthrough]];
             }
-            case 9: {
+            case 11: {
                 if (!msg.num_params.has_value()) {
                     uint64_t num = 0;
                     if (!ParseUintVField(buffer, num)) {
@@ -422,8 +461,12 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqUnsubscribe& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.subscribe_id));
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::UNSUBSCRIBE)));
-        buffer.Push(UintVar(msg.subscribe_id));
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -438,15 +481,19 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqSubscribeDone& msg)
     {
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE_DONE)));
-        buffer.Push(UintVar(msg.subscribe_id));
-        buffer.Push(UintVar(msg.status_code));
-        buffer.PushLengthBytes(msg.reason_phrase);
-        msg.content_exists ? buffer.Push(static_cast<uint8_t>(1)) : buffer.Push(static_cast<uint8_t>(0));
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.subscribe_id));
+        temp_buffer.Push(UintVar(msg.status_code));
+        temp_buffer.PushLengthBytes(msg.reason_phrase);
+        msg.content_exists ? temp_buffer.Push(static_cast<uint8_t>(1)) : temp_buffer.Push(static_cast<uint8_t>(0));
         if (msg.content_exists) {
-            buffer.Push(UintVar(msg.final_group_id));
-            buffer.Push(UintVar(msg.final_object_id));
+            temp_buffer.Push(UintVar(msg.final_group_id));
+            temp_buffer.Push(UintVar(msg.final_object_id));
         }
+
+        // this is another copy (TLV)
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE_DONE)));
+        buffer.PushLengthBytes(temp_buffer.View());
 
         return buffer;
     }
@@ -521,14 +568,19 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqSubscribeOk& msg)
     {
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE_OK)));
-        buffer.Push(UintVar(msg.subscribe_id));
-        buffer.Push(UintVar(msg.expires));
-        msg.content_exists ? buffer.Push(static_cast<uint8_t>(1)) : buffer.Push(static_cast<uint8_t>(0));
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.subscribe_id));
+        temp_buffer.Push(UintVar(msg.expires));
+        msg.content_exists ? temp_buffer.Push(static_cast<uint8_t>(1)) : temp_buffer.Push(static_cast<uint8_t>(0));
         if (msg.content_exists) {
-            buffer.Push(UintVar(msg.largest_group));
-            buffer.Push(UintVar(msg.largest_object));
+            temp_buffer.Push(UintVar(msg.largest_group));
+            temp_buffer.Push(UintVar(msg.largest_object));
         }
+
+        // this is another copy (TLV)
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE_OK)));
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -593,11 +645,16 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqSubscribeError& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.subscribe_id));
+        temp_buffer.Push(UintVar(msg.err_code));
+        temp_buffer.PushLengthBytes(msg.reason_phrase);
+        temp_buffer.Push(UintVar(msg.track_alias));
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SUBSCRIBE_ERROR)));
-        buffer.Push(UintVar(msg.subscribe_id));
-        buffer.Push(UintVar(msg.err_code));
-        buffer.PushLengthBytes(msg.reason_phrase);
-        buffer.Push(UintVar(msg.track_alias));
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -655,9 +712,14 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqAnnounce& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(0)));
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE)));
-        buffer.PushLengthBytes(msg.track_namespace);
-        buffer.Push(UintVar(static_cast<uint64_t>(0)));
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -715,8 +777,13 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqAnnounceOk& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE_OK)));
-        buffer.PushLengthBytes(msg.track_namespace);
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -740,10 +807,16 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqAnnounceError& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace.value());
+        temp_buffer.Push(UintVar(msg.err_code.value()));
+        temp_buffer.PushLengthBytes(msg.reason_phrase.value());
+
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE_ERROR)));
-        buffer.PushLengthBytes(msg.track_namespace.value());
-        buffer.Push(UintVar(msg.err_code.value()));
-        buffer.PushLengthBytes(msg.reason_phrase.value());
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -784,8 +857,12 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqUnannounce& msg)
     {
+        Serializer temp_buffer;
+        temp_buffer.PushLengthBytes(msg.track_namespace);
+
+        // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::UNANNOUNCE)));
-        buffer.PushLengthBytes(msg.track_namespace);
+        buffer.PushLengthBytes(temp_buffer.View());
         return buffer;
     }
 
@@ -809,8 +886,13 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqAnnounceCancel& msg)
     {
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE_CANCEL)));
+        Serializer temp_buffer;
         buffer.PushLengthBytes(msg.track_namespace);
+
+        // this is another copy (TLV)
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE_CANCEL)));
+        buffer.PushLengthBytes(temp_buffer.View());
+
         return buffer;
     }
 
@@ -1266,22 +1348,25 @@ namespace quicr::messages {
     // Client Setup message
     Serializer& operator<<(Serializer& buffer, const MoqClientSetup& msg)
     {
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::CLIENT_SETUP)));
-        buffer.Push(UintVar(msg.supported_versions.size()));
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.supported_versions.size()));
         // versions
         for (const auto& ver : msg.supported_versions) {
-            buffer.Push(UintVar(ver));
+            temp_buffer.Push(UintVar(ver));
         }
 
         /// num params
-        buffer.Push(UintVar(static_cast<uint64_t>(2)));
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(2)));
         // role param
-        buffer.Push(UintVar(msg.role_parameter.type));
-        buffer.PushLengthBytes(msg.role_parameter.value);
+        temp_buffer.Push(UintVar(msg.role_parameter.type));
+        temp_buffer.PushLengthBytes(msg.role_parameter.value);
         // endpoint_id param
-        buffer.Push(UintVar(static_cast<uint64_t>(ParameterType::EndpointId)));
-        buffer.PushLengthBytes(msg.endpoint_id_parameter.value);
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(ParameterType::EndpointId)));
+        temp_buffer.PushLengthBytes(msg.endpoint_id_parameter.value);
 
+
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::CLIENT_SETUP)));
+        buffer.PushLengthBytes(temp_buffer.View());
         return buffer;
     }
 
@@ -1373,19 +1458,22 @@ namespace quicr::messages {
 
     Serializer& operator<<(Serializer& buffer, const MoqServerSetup& msg)
     {
-
-        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SERVER_SETUP)));
-        buffer.Push(UintVar(msg.selection_version));
+        Serializer temp_buffer;
+        temp_buffer.Push(UintVar(msg.selection_version));
 
         /// num params
-        buffer.Push(UintVar(static_cast<uint64_t>(2)));
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(1)));
         // role param
-        buffer.Push(UintVar(static_cast<uint64_t>(msg.role_parameter.type)));
-        buffer.PushLengthBytes(msg.role_parameter.value);
+        temp_buffer.Push(UintVar(static_cast<uint64_t>(msg.role_parameter.type)));
+        temp_buffer.PushLengthBytes(msg.role_parameter.value);
 
         // endpoint_id param
-        buffer.Push(UintVar(static_cast<uint64_t>(ParameterType::EndpointId)));
-        buffer.PushLengthBytes(msg.endpoint_id_parameter.value);
+        //buffer.Push(UintVar(static_cast<uint64_t>(ParameterType::EndpointId)));
+        //buffer.PushLengthBytes(msg.endpoint_id_parameter.value);
+
+        // this is another copy (TLV)
+        buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::SERVER_SETUP)));
+        buffer.PushLengthBytes(temp_buffer.View());
 
         return buffer;
     }

@@ -109,6 +109,13 @@ namespace quicr::messages {
         friend Serializer& operator<<(Serializer& buffer, const MoqParameter& msg);
     };
 
+
+    // This is added to support v6, but this may not sustain for v7 onwards
+    // tuple is a bad design
+    struct Tuple {
+
+    };
+
     //
     // Setup
     //
@@ -160,12 +167,20 @@ namespace quicr::messages {
         AbsoluteRange
     };
 
+    enum struct GroupOrder: uint8_t {
+        PublisherOrder = 0x0,
+        Ascending = 0x1,
+        Descending = 0x2
+    };
+
     struct MoqSubscribe
     {
         uint64_t subscribe_id;
         uint64_t track_alias;
         TrackNamespace track_namespace;
         TrackName track_name;
+        uint8_t subscriber_priority;
+        uint8_t group_order;
         FilterType filter_type{ FilterType::None };
         uint64_t start_group{ 0 };
         uint64_t end_group{ 0 };
@@ -176,7 +191,6 @@ namespace quicr::messages {
         template<class StreamBufferType>
         friend bool operator>>(StreamBufferType& buffer, MoqSubscribe& msg);
         friend Serializer& operator<<(Serializer& buffer, const MoqSubscribe& msg);
-
       private:
         std::optional<MoqParameter> current_param{};
         size_t current_pos{ 0 };
