@@ -118,9 +118,13 @@ namespace quicr::messages {
         uint64_t num_entries {0};
         std::array<Bytes, 32> entries;
 
+        // Todo: compute it once and save it.
+        std::vector<uint8_t> bytes() const;
+
         template<class StreamBufferType>
         friend bool operator>>(StreamBufferType& buffer, Tuple& tuple);
         friend Serializer& operator<<(Serializer& buffer, const Tuple& tuple);
+
     };
 
     //
@@ -184,7 +188,7 @@ namespace quicr::messages {
     {
         uint64_t subscribe_id;
         uint64_t track_alias;
-        TrackNamespace track_namespace;
+        Tuple track_namespace;
         TrackName track_name;
         uint8_t subscriber_priority;
         uint8_t group_order;
@@ -306,7 +310,8 @@ namespace quicr::messages {
 
     struct MoqAnnounce
     {
-        TrackNamespace track_namespace;
+        //TrackNamespace track_namespace;
+        Tuple track_namespace;
         std::vector<MoqParameter> params;
         template<class StreamBufferType>
         friend bool operator>>(StreamBufferType& buffer, MoqAnnounce& msg);
@@ -319,7 +324,7 @@ namespace quicr::messages {
 
     struct MoqAnnounceOk
     {
-        TrackNamespace track_namespace;
+        Tuple track_namespace;
         template<class StreamBufferType>
         friend bool operator>>(StreamBufferType& buffer, MoqAnnounceOk& msg);
         friend Serializer& operator<<(Serializer& buffer, const MoqAnnounceOk& msg);
@@ -327,7 +332,7 @@ namespace quicr::messages {
 
     struct MoqAnnounceError
     {
-        std::optional<TrackNamespace> track_namespace;
+        std::optional<Tuple> track_namespace;
         std::optional<ErrorCode> err_code;
         std::optional<ReasonPhrase> reason_phrase;
 

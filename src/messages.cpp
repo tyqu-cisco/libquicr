@@ -172,6 +172,17 @@ namespace quicr::messages {
     template bool operator>> <StreamBuffer<uint8_t>>(StreamBuffer<uint8_t>&, Tuple&);
     template bool operator>> <SafeStreamBuffer<uint8_t>>(SafeStreamBuffer<uint8_t>&, Tuple&);
 
+    std::vector<uint8_t> Tuple::bytes() const
+    {
+
+        std::vector<uint8_t> merged;
+        for(const auto& entry: entries) {
+            // Merge the vectors using the insert function
+            merged.insert(merged.end(), entry.begin(), entry.end());
+        }
+        return merged;
+
+    }
     //
     // Track Status
     //
@@ -307,7 +318,7 @@ namespace quicr::messages {
         Serializer temp_buffer;
         temp_buffer.Push(UintVar(msg.subscribe_id));
         temp_buffer.Push(UintVar(msg.track_alias));
-        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer << msg.track_namespace;
         temp_buffer.PushLengthBytes(msg.track_name);
         temp_buffer.Push(msg.subscriber_priority);
         temp_buffer.Push(msg.group_order);
@@ -363,9 +374,25 @@ namespace quicr::messages {
                 [[fallthrough]];
             }
             case 2: {
-                if (!ParseBytesField(buffer, msg.track_namespace)) {
-                    return false;
+                // read namespace
+                if (msg.track_namespace.num_entries == 0) {
+                    // don't like the loop here, rather use >> ..
+                    auto val = buffer.DecodeUintV();
+                    if (!val) {
+                        return false;
+                    }
+                    msg.track_namespace.num_entries = *val;
+                } else {
+                    // parse the tuple entries
+                    for (int i = 0; i < msg.track_namespace.num_entries; i++) {
+                        auto tuple = buffer.DecodeBytes();
+                        if (!tuple) {
+                            return false;
+                        }
+                        msg.track_namespace.entries[i] = std::move(tuple.value());
+                    }
                 }
+
                 msg.current_pos += 1;
                 [[fallthrough]];
             }
@@ -752,7 +779,7 @@ namespace quicr::messages {
     Serializer& operator<<(Serializer& buffer, const MoqAnnounce& msg)
     {
         Serializer temp_buffer;
-        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer << msg.track_namespace;
         temp_buffer.Push(UintVar(static_cast<uint64_t>(0)));
 
         // this is another copy (TLV)
@@ -767,12 +794,22 @@ namespace quicr::messages {
     {
 
         // read namespace
-        if (msg.track_namespace.empty()) {
-            auto val = buffer.DecodeBytes();
+        if (msg.track_namespace.num_entries == 0) {
+            // don't like the loop here, rather use >> ..
+            auto val = buffer.DecodeUintV();
             if (!val) {
                 return false;
             }
-            msg.track_namespace = *val;
+            msg.track_namespace.num_entries = *val;
+        } else {
+            // parse the tuple entries
+            for (int i = 0; i < msg.track_namespace.num_entries; i++) {
+                auto tuple = buffer.DecodeBytes();
+                if (!tuple) {
+                    return false;
+                }
+                msg.track_namespace.entries[i] = std::move(tuple.value());
+            }
         }
 
         if (!msg.num_params) {
@@ -817,7 +854,7 @@ namespace quicr::messages {
     Serializer& operator<<(Serializer& buffer, const MoqAnnounceOk& msg)
     {
         Serializer temp_buffer;
-        temp_buffer.PushLengthBytes(msg.track_namespace);
+        temp_buffer << msg.track_namespace;
 
         // this is another copy (TLV)
         buffer.Push(UintVar(static_cast<uint64_t>(MoqMessageType::ANNOUNCE_OK)));
@@ -829,15 +866,25 @@ namespace quicr::messages {
     template<class StreamBufferType>
     bool operator>>(StreamBufferType& buffer, MoqAnnounceOk& msg)
     {
-
         // read namespace
-        if (msg.track_namespace.empty()) {
-            auto val = buffer.DecodeBytes();
+        if (msg.track_namespace.num_entries == 0) {
+            // don't like the loop here, rather use >> ..
+            auto val = buffer.DecodeUintV();
             if (!val) {
                 return false;
             }
-            msg.track_namespace = *val;
+            msg.track_namespace.num_entries = *val;
+        } else {
+            // parse the tuple entries
+            for (int i = 0; i < msg.track_namespace.num_entries; i++) {
+                auto tuple = buffer.DecodeBytes();
+                if (!tuple) {
+                    return false;
+                }
+                msg.track_namespace.entries[i] = std::move(tuple.value());
+            }
         }
+
         return true;
     }
 
@@ -847,7 +894,7 @@ namespace quicr::messages {
     Serializer& operator<<(Serializer& buffer, const MoqAnnounceError& msg)
     {
         Serializer temp_buffer;
-        temp_buffer.PushLengthBytes(msg.track_namespace.value());
+        temp_buffer << msg.track_namespace;
         temp_buffer.Push(UintVar(msg.err_code.value()));
         temp_buffer.PushLengthBytes(msg.reason_phrase.value());
 
@@ -864,12 +911,23 @@ namespace quicr::messages {
     {
 
         // read namespace
-        if (!msg.track_namespace) {
-            auto val = buffer.DecodeBytes();
+        if(msg.track_namespace) {
+        if (msg.track_namespace. == 0) {
+            // don't like the loop here, rather use >> ..
+            auto val = buffer.DecodeUintV();
             if (!val) {
                 return false;
             }
-            msg.track_namespace = *val;
+            msg.track_namespace.num_entries = *val;
+        } else {
+            // parse the tuple entries
+            for (int i = 0; i < msg.track_namespace.num_entries; i++) {
+                auto tuple = buffer.DecodeBytes();
+                if (!tuple) {
+                    return false;
+                }
+                msg.track_namespace.entries[i] = std::move(tuple.value());
+            }
         }
 
         if (!msg.err_code) {

@@ -6,9 +6,10 @@
 #include <cstdint>
 #include <optional>
 #include <vector>
+#include <quicr/detail/messages.h>
 
 namespace quicr {
-    using TrackNamespace = std::vector<uint8_t>;
+    using TrackNamespace = quicr::messages::Tuple;
     using TrackNamespaceHash = uint64_t;
     using TrackNameHash = uint64_t;
 
@@ -41,7 +42,7 @@ namespace quicr {
 
         TrackHash(const FullTrackName& ftn) noexcept
           : track_namespace_hash{ std::hash<std::string_view>{}(
-              { reinterpret_cast<const char*>(ftn.name_space.data()), ftn.name_space.size() }) }
+              { reinterpret_cast<const char*>(ftn.name_space.bytes().data()), ftn.name_space.bytes().size() }) }
           , track_name_hash{ std::hash<std::string_view>{}(
               { reinterpret_cast<const char*>(ftn.name.data()), ftn.name.size() }) }
         {
