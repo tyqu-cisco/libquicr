@@ -6,10 +6,10 @@
 	url = https://github.com/quicr/boringssl
 [submodule "dependencies/picotls"]
 	path = dependencies/picotls
-	url = https://github.com/quicr/picotls
+	url = https://github.com/h2o/picotls.git
 [submodule "dependencies/picoquic"]
 	path = dependencies/picoquic
-	url = https://github.com/quicr/picoquic
+	url = https://github.com/private-octopus/picoquic.git 
 [submodule "dependencies/mbedtls"]
 	path = dependencies/mbedtls
 	url = https://github.com/Mbed-TLS/mbedtls.git
